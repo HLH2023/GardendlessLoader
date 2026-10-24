@@ -79,6 +79,52 @@ class ResourcePickerService {
     }
   }
 
+  /// Extracts a ZIP the launcher already downloaded to [zipPath]; the native
+  /// side reads the same file the picker would have handed it.
+  Future<Directory?> extractLocalZip({
+    required String zipPath,
+    required Directory targetDirectory,
+    ImportProgressCallback? onProgress,
+  }) async {
+    if (!_isSupportedPlatform) {
+      throw ResourcePickerFailure(
+        '当前平台不支持从服务器下载资源：$_platformName',
+        code: 'platform_unsupported',
+      );
+    }
+
+    _onProgress = onProgress;
+    try {
+      final extractedPath =
+          await _mobileZipImporterChannel.invokeMethod<String>(
+        'extractLocalZip',
+        <String, Object?>{
+          'zipPath': zipPath,
+          'targetDirectory': targetDirectory.path,
+        },
+      );
+      return extractedPath == null ? null : Directory(extractedPath);
+    } on MissingPluginException {
+      throw ResourcePickerFailure(
+        '当前平台不支持从服务器下载资源：$_platformName',
+        code: 'platform_unsupported',
+      );
+    } on PlatformException catch (error) {
+      if (error.code == 'notImplemented') {
+        throw ResourcePickerFailure(
+          '当前平台不支持从服务器下载资源：$_platformName',
+          code: 'platform_unsupported',
+        );
+      }
+      throw ResourcePickerFailure(
+        error.message ?? '无法解压下载的资源包',
+        code: error.code,
+      );
+    } finally {
+      _onProgress = null;
+    }
+  }
+
   bool get _isSupportedPlatform =>
       _platformName == 'android' ||
       _platformName == 'ios' ||

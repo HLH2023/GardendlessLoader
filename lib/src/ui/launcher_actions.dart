@@ -42,6 +42,7 @@ class LauncherActions {
     required this.copyLogEvent,
     required this.deleteLogHistory,
     required this.toggleImportDetails,
+    required this.downloadServerResources,
   });
 
   final ValueChanged<LauncherDestination> navigate;
@@ -56,6 +57,10 @@ class LauncherActions {
   final Future<void> Function(Map<String, Object?> event) copyLogEvent;
   final Future<void> Function() deleteLogHistory;
   final VoidCallback toggleImportDetails;
+
+  /// Downloads the latest resource ZIP from the configured save server and
+  /// imports it; the page never reaches the network itself.
+  final Future<void> Function() downloadServerResources;
 }
 
 List<AnnouncementLink> socialLinks(AppStrings strings, LauncherLinks links) => [

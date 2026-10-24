@@ -16,6 +16,17 @@ const remoteAnnouncementUrls = [
 ]; // 远程公告 URL，按顺序尝试；GitHub 无法访问时改用 jsDelivr
 const remoteAboutContentUrl =
     'https://raw.githubusercontent.com/Dey410/GardendlessLoader/main/about_content.json'; // 远程关于内容 URL
+// 云存档与资源服务器地址：只能由构建时的 --dart-define=PVZGE_SERVER=… 注入，
+// 默认留空，用户也可以在设置页填写。仓库里不保存任何真实服务器地址。
+const kDefaultServerBase = String.fromEnvironment(
+  'PVZGE_SERVER',
+  defaultValue: '',
+);
+const saveServerRequestTimeout = Duration(seconds: 20); // 服务器请求（清单、注入脚本）超时时间
+const saveServerDownloadConnectTimeout = Duration(seconds: 20); // 资源下载建立连接的超时时间
+const saveServerManifestMaxBytes = 512 * 1024; // 资源清单最大响应体，512KB
+const saveServerScriptMaxBytes = 2 * 1024 * 1024; // 注入脚本最大响应体，2MB
+const syncBridgeFileName = '__sync_app.js'; // 云存档注入脚本文件名（与资源槽同级）
 const resourceFolderName = 'GardendlessLoader'; // 资源文件夹名称
 const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '0.9.0');
 const announcementTimeout = Duration(seconds: 3); //公告请求超时时间

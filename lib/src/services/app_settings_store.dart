@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../constants.dart';
 import '../game_host/game_host.dart';
 
 enum ThemePreference {
@@ -63,6 +64,8 @@ class AppSettings {
     this.toolShedUnlocked = false,
     this.touchDiagnosticsEnabled = false,
     this.gestureHintShown = false,
+    this.serverBaseUrl = kDefaultServerBase,
+    this.deviceToken = '',
   });
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -82,6 +85,8 @@ class AppSettings {
       touchDiagnosticsEnabled:
           json['touchDiagnosticsEnabled'] as bool? ?? false,
       gestureHintShown: json['gestureHintShown'] as bool? ?? false,
+      serverBaseUrl: _readBaseUrl(json['serverBaseUrl']),
+      deviceToken: (json['deviceToken'] as String? ?? '').trim(),
     );
   }
 
@@ -110,6 +115,27 @@ class AppSettings {
   /// The gesture hint shows over the game once, on the first launch.
   final bool gestureHintShown;
 
+  /// Where the save server lives: device tokens, cloud saves and the
+  /// resource manifest are all served from here. Only ever set at runtime by
+  /// the user or by `--dart-define=PVZGE_SERVER=…`; never in the repository.
+  final String serverBaseUrl;
+
+  /// The device token the user issued at `{server}/_save/app.html`; empty
+  /// means cloud features stay off. Only ever pasted at runtime.
+  final String deviceToken;
+
+  /// The server this app talks to: the value saved in settings, else the one
+  /// compiled in. Empty when neither is a usable https URL.
+  String get effectiveServerBaseUrl {
+    final raw = serverBaseUrl.trim();
+    if (raw.isEmpty) {
+      return normalizeServerBaseUrl(kDefaultServerBase) ?? '';
+    }
+    return normalizeServerBaseUrl(raw) ?? '';
+  }
+
+  bool get hasDeviceToken => deviceToken.trim().isNotEmpty;
+
   AppSettings copyWith({
     bool? watermarkEnabled,
     bool? quickLaunchEnabled,
@@ -123,6 +149,8 @@ class AppSettings {
     bool? toolShedUnlocked,
     bool? touchDiagnosticsEnabled,
     bool? gestureHintShown,
+    String? serverBaseUrl,
+    String? deviceToken,
   }) {
     return AppSettings(
       watermarkEnabled: watermarkEnabled ?? this.watermarkEnabled,
@@ -139,6 +167,8 @@ class AppSettings {
       touchDiagnosticsEnabled:
           touchDiagnosticsEnabled ?? this.touchDiagnosticsEnabled,
       gestureHintShown: gestureHintShown ?? this.gestureHintShown,
+      serverBaseUrl: serverBaseUrl ?? this.serverBaseUrl,
+      deviceToken: deviceToken ?? this.deviceToken,
     );
   }
 
@@ -155,7 +185,51 @@ class AppSettings {
         'toolShedUnlocked': toolShedUnlocked,
         'touchDiagnosticsEnabled': touchDiagnosticsEnabled,
         'gestureHintShown': gestureHintShown,
+        'serverBaseUrl': serverBaseUrl,
+        'deviceToken': deviceToken,
       };
+}
+
+/// Settings kept before the save server was configurable have no base URL;
+/// a blank value stays blank so the compiled-in default can apply.
+String _readBaseUrl(Object? value) {
+  return value is String ? value.trim() : '';
+}
+
+/// Accepts only an https origin (plain http is allowed solely for a loopback
+/// development server). Returns it without a trailing slash, or null when the
+/// value is not a usable base URL.
+String? normalizeServerBaseUrl(String? value) {
+  final raw = value?.trim() ?? '';
+  if (raw.isEmpty) {
+    return null;
+  }
+  final uri = Uri.tryParse(raw);
+  if (uri == null ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty ||
+      uri.hasQuery ||
+      uri.hasFragment) {
+    return null;
+  }
+  final isLoopback = uri.host == 'localhost' || uri.host == '127.0.0.1';
+  final schemeAccepted =
+      uri.scheme == 'https' || (uri.scheme == 'http' && isLoopback);
+  if (!schemeAccepted) {
+    return null;
+  }
+  final path = uri.path.replaceFirst(RegExp(r'/+$'), '');
+  final port = uri.hasPort ? ':${uri.port}' : '';
+  return '${uri.scheme}://${uri.host}$port$path';
+}
+
+/// What may appear in a log line: the scheme and a mask, never the host.
+String maskedServerBase(String baseUrl) {
+  final uri = Uri.tryParse(baseUrl.trim());
+  if (uri == null || uri.scheme.isEmpty) {
+    return '***';
+  }
+  return '${uri.scheme}://***';
 }
 
 class AppSettingsStore {

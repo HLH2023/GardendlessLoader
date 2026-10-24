@@ -182,7 +182,34 @@ class GameActivity : Activity() {
                     append(it.readText())
                 }
             }
+            appendSaveBridge()
         }
+    }
+
+    /**
+     * Appends the save-server shim the launcher wrote before this launch. It
+     * sits beside the resource slots, not inside one: an indexed pack rejects
+     * files its index does not list. A missing or unreadable file only means
+     * the game runs without cloud saves, so it never fails the launch.
+     */
+    private fun StringBuilder.appendSaveBridge() {
+        val bridge = File(session.appRoot, SAVE_BRIDGE_FILE_NAME)
+        if (!bridge.isFile) return
+        val script = runCatching { bridge.readText() }.getOrNull()
+        if (script.isNullOrBlank()) return
+        append('\n')
+        append(sanitizeInlineScript(script))
+    }
+
+    /**
+     * [GameResourceResolver] inlines this script into index.html, so neither
+     * `</script` nor `<!--` may survive in it; escaping them keeps the script's
+     * meaning inside a JavaScript string.
+     */
+    private fun sanitizeInlineScript(script: String): String {
+        return script
+            .replace("</script", "<\\/script", ignoreCase = true)
+            .replace("<!--", "<\\!--")
     }
 
     private fun openFileChooser(intent: Intent, callback: ValueCallback<Array<Uri>>) {
@@ -776,6 +803,9 @@ class GameActivity : Activity() {
 
     companion object {
         const val EXTRA_SESSION = "gameSession"
+
+        /** Save-server shim the launcher writes into the resource slot. */
+        const val SAVE_BRIDGE_FILE_NAME = "__sync_app.js"
 
         /** True while a game host is open; see [LaunchRouterActivity]. */
         @Volatile

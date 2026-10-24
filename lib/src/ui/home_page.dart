@@ -66,6 +66,7 @@ class _HomePageState extends State<HomePage> {
     deleteLogHistory: _deleteLogHistory,
     toggleImportDetails: () =>
         setState(() => _importDetailsExpanded = !_importDetailsExpanded),
+    downloadServerResources: _downloadServerResources,
   );
 
   @override
@@ -382,6 +383,23 @@ class _HomePageState extends State<HomePage> {
       message: strings.downgradeMessage(current, incoming),
       confirmLabel: strings.importAnyway,
       confirmTone: GardenButtonTone.danger,
+    );
+  }
+
+  /// Same backup warning as a picked ZIP, then the controller downloads and
+  /// imports the server's latest resources.
+  Future<void> _downloadServerResources() async {
+    if (_controller.hasCurrentResource) {
+      final strings = context.strings;
+      final confirmed = await _confirm(
+        title: strings.backUpSaveTitle,
+        message: strings.backUpSaveMessage,
+        confirmLabel: strings.continueImport,
+      );
+      if (!confirmed) return;
+    }
+    await _controller.downloadLatestResources(
+      confirmDowngrade: _confirmDowngrade,
     );
   }
 

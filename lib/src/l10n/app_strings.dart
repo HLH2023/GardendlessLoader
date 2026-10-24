@@ -267,6 +267,63 @@ class AppStrings {
         'Show the loader name in a corner of the game',
       );
 
+  // Settings page: save server.
+  String get saveServer => _t('云存档服务器', 'Save server');
+  String get saveServerSubtitle => _t(
+        '用于云存档与从服务器下载游戏资源。地址与令牌只保存在本机，不进仓库。',
+        'Used for cloud saves and for downloading game resources. The address '
+            'and token stay on this device and never enter the repository.',
+      );
+  String get saveServerAddress => _t('服务器地址', 'Server address');
+  String get saveServerAddressHint =>
+      _t('以 https:// 开头', 'Starts with https://');
+  String get deviceToken => _t('设备令牌', 'Device token');
+  String get deviceTokenHint =>
+      _t('在浏览器签发后粘贴到这里', 'Paste the token issued in the browser');
+  String get saveServerInvalid => _t(
+        '地址无效：请填写以 https:// 开头的完整地址',
+        'Invalid address: use a full URL starting with https://',
+      );
+  String saveServerTokenIssue(String base) => _t(
+        '令牌在 $base 签发；留空则关闭云存档。',
+        'Issue a token at $base. Leave it empty to turn cloud saves off.',
+      );
+  String get saveServerNotConfigured => _t(
+        '尚未配置服务器地址或设备令牌，请先到「设置」页填写。',
+        'No server address or device token yet. Fill them in on the Settings '
+            'page first.',
+      );
+  String get saveServerAddressRequired => _t(
+        '先填写有效的服务器地址，再用浏览器打开该地址签发令牌。',
+        'Set a valid server address first, then open it in a browser to issue '
+            'a token.',
+      );
+  String get saved => _t('已保存', 'Saved');
+
+  // Resources page: server download.
+  String get serverResources => _t('服务器资源', 'Server resources');
+  String get serverResourcesDescription => _t(
+        '从配置的服务器下载最新资源包，可断点续传；下载完成后走与「选择 ZIP 导入」相同的导入流程。',
+        'Download the latest resource ZIP from the configured server, resuming '
+            'an interrupted download. It then imports exactly like a picked '
+            'ZIP.',
+      );
+  String get checkServerResources => _t('检查服务器', 'Check server');
+  String get downloadFromServer => _t('从服务器下载最新资源', 'Download latest');
+  String get cancelDownload => _t('取消下载', 'Cancel download');
+  String get downloadCompleted => _t('下载并导入完成', 'Downloaded and imported');
+  String downloadProgress(String done, String total) =>
+      _t('已下载 $done / $total', 'Downloaded $done / $total');
+  String get importingDownloaded => _t('正在导入下载的资源…', 'Importing the download…');
+  String get remoteDownloadCancelled =>
+      _t('已取消下载，可稍后继续', 'Download cancelled; it resumes later');
+  String get remoteDownloadFailed => _t('下载失败', 'Download failed');
+  String get serverDownloadUnsupported => _t(
+        '当前平台暂不支持从服务器下载资源，请用「选择 ZIP 导入」。',
+        'Downloading resources from the server is not supported on this '
+            'platform yet; use "Select ZIP to import" instead.',
+      );
+
   // Settings page: appearance.
   String get appearance => _t('外观', 'Appearance');
   String get theme => _t('主题', 'Theme');

@@ -24,6 +24,7 @@ import 'services/game_update_check_service.dart';
 import 'services/import_service.dart';
 import 'services/import_progress_meter.dart';
 import 'services/manifest_store.dart';
+import 'services/remote_resource_service.dart';
 import 'services/resource_validator.dart';
 import 'services/resource_picker_service.dart';
 import 'services/shortcut_service.dart';
@@ -54,7 +55,13 @@ class AppController extends ChangeNotifier {
       GameUpdateCheckService();
   final ResourcePickerService _resourcePickerService = ResourcePickerService();
   final ShortcutService _shortcutService = ShortcutService();
+  final RemoteResourceService _remoteResourceService = RemoteResourceService();
   late final ImportService _importService;
+  RemoteDownloadStatus _remoteDownload = RemoteDownloadStatus.idle;
+  RemoteResourceManifest? _remoteManifest;
+  ({String? code, String message})? _remoteManifestFailure;
+  bool _remoteManifestLoading = false;
+  RemoteDownloadCancellation? _remoteCancellation;
   ImportProgressMeter? _importProgressMeter;
   Timer? _importCompletionTimer;
   Timer? _importProgressTickTimer;
@@ -163,6 +170,30 @@ class AppController extends ChangeNotifier {
   bool get touchDiagnosticsEnabled => _appSettings.touchDiagnosticsEnabled;
   bool get autoCollectSunEnabled => _manifest.autoCollectSunEnabled;
   GameHostPlatform get gameHostPlatform => GameHostPlatform.current();
+
+  /// Where the user signed in to issue the device token, and the server the
+  /// app asks for saves and resources.
+  String get serverBaseUrl => _appSettings.serverBaseUrl;
+  String get deviceToken => _appSettings.deviceToken;
+  bool get cloudServerConfigured =>
+      _appSettings.hasDeviceToken &&
+      _appSettings.effectiveServerBaseUrl.isNotEmpty;
+
+  /// Only the Android host implements extracting a downloaded ZIP; elsewhere
+  /// the launcher must not start a multi-gigabyte download it cannot import.
+  bool get serverResourceDownloadSupported => Platform.isAndroid;
+
+  /// Page a user opens in a browser to issue a device token.
+  String get deviceTokenUrl {
+    final base = _appSettings.effectiveServerBaseUrl;
+    return base.isEmpty ? '' : '$base/_save/app.html';
+  }
+
+  RemoteDownloadStatus get remoteDownload => _remoteDownload;
+  RemoteResourceManifest? get remoteManifest => _remoteManifest;
+  ({String? code, String message})? get remoteManifestFailure =>
+      _remoteManifestFailure;
+  bool get remoteManifestLoading => _remoteManifestLoading;
 
   bool get isImporting =>
       _importProgress.phase != ImportPhase.idle &&
@@ -549,6 +580,47 @@ class AppController extends ChangeNotifier {
     bool incoming = false,
     required Future<bool> Function(String current, String incoming)
         confirmDowngrade,
+  }) {
+    return _runImport(
+      source: incoming ? 'incoming' : 'picker',
+      showPickerNotice: !incoming,
+      confirmDowngrade: confirmDowngrade,
+      extract: (target) => _resourcePickerService.extractDocsZip(
+        incoming: incoming,
+        targetDirectory: target.directory,
+        onProgress: _updateImportProgress,
+      ),
+    );
+  }
+
+  /// Imports a ZIP the launcher downloaded from the save server into the same
+  /// import transaction the picker uses, so activation, validation and
+  /// rollback behave identically.
+  Future<void> importDownloadedZip({
+    required File zipFile,
+    required Future<bool> Function(String current, String incoming)
+        confirmDowngrade,
+  }) {
+    return _runImport(
+      source: 'server',
+      showPickerNotice: false,
+      confirmDowngrade: confirmDowngrade,
+      extract: (target) => _resourcePickerService.extractLocalZip(
+        zipPath: zipFile.path,
+        targetDirectory: target.directory,
+        onProgress: _updateImportProgress,
+      ),
+    );
+  }
+
+  /// The shared import transaction: prepare a target slot, hand it to
+  /// [extract], then activate what it extracted.
+  Future<void> _runImport({
+    required String source,
+    required bool showPickerNotice,
+    required Future<bool> Function(String current, String incoming)
+        confirmDowngrade,
+    required Future<Directory?> Function(ImportTarget target) extract,
   }) async {
     final paths = _requirePaths();
     final manifestStore = _requireManifestStore();
@@ -573,7 +645,7 @@ class AppController extends ChangeNotifier {
       event: 'resource_import_started',
       outcome: LogOutcome.started,
       operationId: operationId,
-      context: <String, Object?>{'source': incoming ? 'incoming' : 'picker'},
+      context: <String, Object?>{'source': source},
     );
 
     var restoreAwakeModeAfterImport = false;
@@ -592,7 +664,7 @@ class AppController extends ChangeNotifier {
         operationId: operationId,
         context: <String, Object?>{'targetSlot': importTarget.slot.name},
       );
-      if (!incoming) {
+      if (showPickerNotice) {
         _message = LauncherMessage(AppStrings.current.openingFilePicker);
         notifyListeners();
       }
@@ -603,11 +675,7 @@ class AppController extends ChangeNotifier {
         outcome: LogOutcome.started,
         operationId: operationId,
       );
-      final selectedSource = await _resourcePickerService.extractDocsZip(
-        incoming: incoming,
-        targetDirectory: importTarget.directory,
-        onProgress: _updateImportProgress,
-      );
+      final selectedSource = await extract(importTarget);
       if (selectedSource == null) {
         _appLogger.emit(
           level: LogLevel.info,
@@ -935,6 +1003,8 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _remoteCancellation?.cancel();
+    _remoteResourceService.abortActiveRequests();
     _importCompletionTimer?.cancel();
     _importProgressTickTimer?.cancel();
     super.dispose();
@@ -981,14 +1051,14 @@ class AppController extends ChangeNotifier {
       gestureHint: _appSettings.gestureHintShown
           ? null
           : AppStrings.current.gestureHintLines(gameHostPlatform),
-      allowedRemoteHosts: hasGpNext
-          ? const ['pvzge.com', 'github.com', 'discord.gg']
-          : const [],
+      allowedRemoteHosts: _allowedRemoteHosts(),
       gpNextRoot: paths.gpNextDir.path,
       exportTemporaryRoot: exportRoot.path,
     );
     final store = _gameSessionStore ??= GameSessionStore(paths.root);
     Future<void> launch() async {
+      // Written before the session starts: the native host inlines it.
+      await _prepareSaveBridge(paths.root);
       await store.prepare(session);
       _importCompletionTimer?.cancel();
       _importProgressTickTimer?.cancel();
@@ -1157,6 +1227,346 @@ class AppController extends ChangeNotifier {
     );
   }
 
+  /// Saves the address the user typed. Only an https origin is accepted (a
+  /// loopback http address is allowed for a local server); a blank value
+  /// clears it, which falls back to the address compiled in at build time.
+  Future<bool> setServerBaseUrl(String value) async {
+    final trimmed = value.trim();
+    if (trimmed.isNotEmpty && normalizeServerBaseUrl(trimmed) == null) {
+      return false;
+    }
+    await _updateAppSettings(_appSettings.copyWith(serverBaseUrl: trimmed));
+    return true;
+  }
+
+  Future<void> setDeviceToken(String value) {
+    return _updateAppSettings(_appSettings.copyWith(deviceToken: value.trim()));
+  }
+
+  /// Reads `{base}/_save/app/res/manifest.json` so the page can show which
+  /// resource version the server offers before downloading it.
+  Future<void> refreshRemoteManifest() async {
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) {
+      _remoteManifestFailure = (
+        code: base.isEmpty ? 'save_server_invalid' : 'save_token_missing',
+        message: AppStrings.current.saveServerNotConfigured,
+      );
+      _remoteManifest = null;
+      notifyListeners();
+      return;
+    }
+    if (_remoteManifestLoading) {
+      return;
+    }
+    _remoteManifestLoading = true;
+    _remoteManifestFailure = null;
+    notifyListeners();
+    try {
+      _remoteManifest = await _remoteResourceService.fetchManifest(
+        token: token,
+        baseUrl: base,
+      );
+      final latest = _remoteManifest?.latestZip;
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'resource.remote',
+        event: 'remote_resource_manifest_fetched',
+        outcome: LogOutcome.succeeded,
+        context: <String, Object?>{
+          'gameVersion': _remoteManifest?.gameVersion ?? 'unknown',
+          'zipName': latest?.name ?? 'none',
+          'zipSize': latest?.size ?? 0,
+        },
+      );
+    } on RemoteResourceFailure catch (failure) {
+      _remoteManifest = null;
+      _remoteManifestFailure = (code: failure.code, message: failure.message);
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'resource.remote',
+        event: 'remote_resource_manifest_fetched',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        message: failure.message,
+      );
+    } catch (error, stackTrace) {
+      _remoteManifest = null;
+      _remoteManifestFailure = (
+        code: 'resource_manifest_unavailable',
+        message: '$error',
+      );
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'resource.remote',
+        event: 'remote_resource_manifest_fetched',
+        outcome: LogOutcome.failed,
+        code: 'resource_manifest_unavailable',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    } finally {
+      _remoteManifestLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Downloads the manifest's latest ZIP (resuming a partial one) and imports
+  /// it through the same transaction the ZIP picker uses.
+  Future<void> downloadLatestResources({
+    required Future<bool> Function(String current, String incoming)
+        confirmDowngrade,
+  }) async {
+    if (_busy || isImporting || _remoteDownload.active) {
+      return;
+    }
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) {
+      _remoteDownload = RemoteDownloadStatus(
+        phase: RemoteDownloadPhase.failed,
+        errorCode: base.isEmpty ? 'save_server_invalid' : 'save_token_missing',
+        message: AppStrings.current.saveServerNotConfigured,
+      );
+      notifyListeners();
+      return;
+    }
+
+    final paths = _requirePaths();
+    final cancellation = RemoteDownloadCancellation();
+    _remoteCancellation = cancellation;
+    _remoteDownload = const RemoteDownloadStatus(
+      phase: RemoteDownloadPhase.downloading,
+    );
+    notifyListeners();
+    final stopwatch = Stopwatch()..start();
+    var lastProgressNotify = DateTime.fromMillisecondsSinceEpoch(0);
+
+    try {
+      final manifest = _remoteManifest ??
+          await _remoteResourceService.fetchManifest(
+            token: token,
+            baseUrl: base,
+          );
+      _remoteManifest = manifest;
+      final zip = manifest.latestZip;
+      if (zip == null) {
+        throw const RemoteResourceFailure(
+          'resource_manifest_empty',
+          '服务器没有可用资源包',
+        );
+      }
+      final directory = paths.downloadsDir;
+      await directory.create(recursive: true);
+      // The manifest name comes from the server: keep only its last segment so
+      // it can never point outside the download directory.
+      final safeName = p.basename(zip.name);
+      final target = File(
+        p.join(directory.path, safeName.isEmpty ? 'resources.zip' : safeName),
+      );
+      _remoteDownload = RemoteDownloadStatus(
+        phase: RemoteDownloadPhase.downloading,
+        version: zip.version,
+        totalBytes: zip.size,
+      );
+      notifyListeners();
+
+      final downloaded = await _remoteResourceService.downloadZip(
+        manifest: manifest,
+        token: token,
+        baseUrl: base,
+        targetFile: target,
+        cancellation: cancellation,
+        onProgress: (progress) {
+          final now = DateTime.now();
+          if (now.difference(lastProgressNotify) <
+              const Duration(milliseconds: 200)) {
+            return;
+          }
+          lastProgressNotify = now;
+          _remoteDownload = RemoteDownloadStatus(
+            phase: RemoteDownloadPhase.downloading,
+            version: zip.version,
+            receivedBytes: progress.receivedBytes,
+            totalBytes:
+                progress.totalBytes > 0 ? progress.totalBytes : zip.size,
+          );
+          notifyListeners();
+        },
+      );
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'resource.remote',
+        event: 'remote_resource_download_finished',
+        outcome: LogOutcome.succeeded,
+        durationMs: stopwatch.elapsedMilliseconds,
+        context: <String, Object?>{
+          'zipName': zip.name,
+          'zipSize': zip.size,
+          'gameVersion': zip.version,
+        },
+      );
+
+      _remoteDownload = RemoteDownloadStatus(
+        phase: RemoteDownloadPhase.importing,
+        version: zip.version,
+        receivedBytes: zip.size,
+        totalBytes: zip.size,
+      );
+      notifyListeners();
+
+      await importDownloadedZip(
+        zipFile: downloaded,
+        confirmDowngrade: confirmDowngrade,
+      );
+      if (_importProgress.phase == ImportPhase.completed) {
+        try {
+          if (await downloaded.exists()) {
+            await downloaded.delete();
+          }
+        } catch (_) {
+          // A kept ZIP only costs space; the import already succeeded.
+        }
+        _remoteDownload = RemoteDownloadStatus(
+          phase: RemoteDownloadPhase.completed,
+          version: _manifest.gameVersion ?? zip.version,
+          receivedBytes: zip.size,
+          totalBytes: zip.size,
+        );
+      } else {
+        // The import progress region explains a declined or failed import.
+        _remoteDownload = RemoteDownloadStatus.idle;
+      }
+    } on RemoteResourceCancelled {
+      _remoteDownload = RemoteDownloadStatus.idle;
+      _message = LauncherMessage(AppStrings.current.remoteDownloadCancelled);
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'resource.remote',
+        event: 'remote_resource_download_finished',
+        outcome: LogOutcome.cancelled,
+        durationMs: stopwatch.elapsedMilliseconds,
+      );
+    } on RemoteResourceFailure catch (failure) {
+      _remoteDownload = RemoteDownloadStatus(
+        phase: RemoteDownloadPhase.failed,
+        errorCode: failure.code,
+        message: failure.message,
+      );
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'resource.remote',
+        event: 'remote_resource_download_finished',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        message: failure.message,
+        durationMs: stopwatch.elapsedMilliseconds,
+      );
+    } catch (error, stackTrace) {
+      _remoteDownload = RemoteDownloadStatus(
+        phase: RemoteDownloadPhase.failed,
+        errorCode: 'resource_download_failed',
+        message: '$error',
+      );
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'resource.remote',
+        event: 'remote_resource_download_finished',
+        outcome: LogOutcome.failed,
+        code: 'resource_download_failed',
+        error: error,
+        stackTrace: stackTrace,
+        durationMs: stopwatch.elapsedMilliseconds,
+      );
+    } finally {
+      _remoteCancellation = null;
+      notifyListeners();
+    }
+  }
+
+  /// Stops a running download; the bytes already on disk stay for a resume.
+  void cancelRemoteDownload() {
+    _remoteCancellation?.cancel();
+    _remoteResourceService.abortActiveRequests();
+  }
+
+  /// Hosts the game may open outside the WebView. The save server joins them
+  /// once a device token is set, so an export can reach it.
+  List<String> _allowedRemoteHosts() {
+    final hosts = hasGpNext
+        ? <String>['pvzge.com', 'github.com', 'discord.gg']
+        : <String>[];
+    final serverHost = Uri.tryParse(_appSettings.effectiveServerBaseUrl)?.host;
+    if (_appSettings.hasDeviceToken &&
+        serverHost != null &&
+        serverHost.isNotEmpty &&
+        !hosts.contains(serverHost)) {
+      hosts.add(serverHost);
+    }
+    return hosts;
+  }
+
+  /// Writes the save server's document-start shim where the native host reads
+  /// it. It sits beside the slots, never inside one: an indexed resource pack
+  /// rejects any file its index does not list. A failed fetch must never block
+  /// the launch: the game opens without cloud saves and the log records why.
+  Future<void> _prepareSaveBridge(Directory appRoot) async {
+    final file = File(p.join(appRoot.path, syncBridgeFileName));
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) {
+      await _deleteFileQuietly(file);
+      return;
+    }
+    try {
+      final script = await _remoteResourceService.fetchAppSyncScript(
+        token: token,
+        baseUrl: base,
+      );
+      final buffer = StringBuffer()
+        ..write('window.__PVZGE_APP__={base:')
+        ..write(_jsStringLiteral(base))
+        ..write(',token:')
+        ..write(_jsStringLiteral(token))
+        ..write('};\n')
+        ..write(escapeDocumentStartScript(script));
+      final content = buffer.toString();
+      await file.writeAsString(content, flush: true);
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'game.host',
+        event: 'save_server_bridge_ready',
+        outcome: LogOutcome.succeeded,
+        context: <String, Object?>{
+          'server': maskedServerBase(base),
+          'bytes': content.length,
+        },
+      );
+    } catch (error, stackTrace) {
+      await _deleteFileQuietly(file);
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'game.host',
+        event: 'save_server_bridge_failed',
+        outcome: LogOutcome.failed,
+        code: 'save_bridge_unavailable',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  Future<void> _deleteFileQuietly(File file) async {
+    try {
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {
+      // An unreadable leftover cannot be inlined after the next launch anyway.
+    }
+  }
+
   /// The launcher's own state files as they are on disk, for the tool shed.
   String toolShedSnapshot() {
     const encoder = JsonEncoder.withIndent('  ');
@@ -1300,4 +1710,26 @@ int? _versionOrder(String? incoming, String? current) => incoming != null &&
 
 String _newGameSessionId() {
   return '${DateTime.now().toUtc().microsecondsSinceEpoch}-${pid.toRadixString(16)}';
+}
+
+/// A JavaScript single-quoted string literal, safe to paste into the shim
+/// prefix the server script expects.
+String _jsStringLiteral(String value) {
+  final escaped = value
+      .replaceAll('\\', r'\\')
+      .replaceAll("'", r"\'")
+      .replaceAll('\r', '')
+      .replaceAll('\n', r'\n')
+      .replaceAll('\u2028', r'\u2028')
+      .replaceAll('\u2029', r'\u2029');
+  return "'$escaped'";
+}
+
+/// The native host inlines the document-start script into `index.html`, which
+/// forbids `</script` and `<!--` in it. Escaping the slash (and the comment
+/// opener) keeps the script's meaning while satisfying that rule.
+String escapeDocumentStartScript(String script) {
+  return script
+      .replaceAll(RegExp('</script', caseSensitive: false), r'<\/script')
+      .replaceAll('<!--', r'<\!--');
 }
