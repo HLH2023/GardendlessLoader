@@ -41,6 +41,16 @@ class LoginActivity : Activity() {
 
     private var pageHost: String = ""
     private var baseUrl: String = ""
+
+    /**
+     * Hosts the sign-in flow may visit inside the WebView.
+     *
+     * The authentik UI usually lives on its own host (a different subdomain from
+     * the save server), and the flow bounces there and back. Without this set
+     * every hop would be handed to the system browser, the flow would finish
+     * outside the app and the token bridge would never fire.
+     */
+    private val loginHosts = mutableSetOf<String>()
     private var delivered = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,6 +68,11 @@ class LoginActivity : Activity() {
         }
         baseUrl = normalizedBase
         pageHost = Uri.parse(normalizedBase).host.orEmpty().lowercase(Locale.ROOT)
+        intent.getStringArrayListExtra(EXTRA_ALLOWED_HOSTS)?.forEach { raw ->
+            val cleaned = raw.trim().lowercase(Locale.ROOT)
+            if (cleaned.isNotEmpty()) loginHosts.add(cleaned)
+        }
+        loginHosts.add(pageHost)
 
         buildContent(intent.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() } ?: defaultTitle())
         configureWebView()
@@ -201,7 +216,9 @@ class LoginActivity : Activity() {
 
     private fun intercept(uri: Uri): Boolean {
         val host = uri.host?.lowercase(Locale.ROOT) ?: return true
-        if (host != pageHost) {
+        // The sign-in flow legitimately hops to the identity provider's host;
+        // only hosts discovered from the redirect chain are allowed in.
+        if (host != pageHost && host !in loginHosts) {
             openExternally(uri)
             return true
         }
@@ -317,6 +334,9 @@ class LoginActivity : Activity() {
         const val EXTRA_BASE_URL = "io.github.dey410.gardendlessloader.extra.LOGIN_BASE_URL"
         const val EXTRA_PAGE_URL = "io.github.dey410.gardendlessloader.extra.LOGIN_PAGE_URL"
         const val EXTRA_TITLE = "io.github.dey410.gardendlessloader.extra.LOGIN_TITLE"
+
+        /** Extra hosts (e.g. the identity provider) the flow may visit in-app. */
+        const val EXTRA_ALLOWED_HOSTS = "io.github.dey410.gardendlessloader.extra.LOGIN_ALLOWED_HOSTS"
         const val EXTRA_TOKEN = "io.github.dey410.gardendlessloader.extra.LOGIN_TOKEN"
         const val EXTRA_ACCOUNT_ID = "io.github.dey410.gardendlessloader.extra.LOGIN_ACCOUNT_ID"
         const val EXTRA_ERROR_CODE = "io.github.dey410.gardendlessloader.extra.LOGIN_ERROR_CODE"

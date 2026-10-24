@@ -121,6 +121,10 @@ class MainActivity : FlutterActivity() {
                         .putExtra(
                             LoginActivity.EXTRA_TITLE,
                             call.argument<String>("title").orEmpty(),
+                        )
+                        .putStringArrayListExtra(
+                            LoginActivity.EXTRA_ALLOWED_HOSTS,
+                            ArrayList(call.argument<List<String>>("allowedHosts").orEmpty()),
                         ),
                     cloudLoginRequestCode,
                 )

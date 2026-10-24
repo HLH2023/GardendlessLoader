@@ -58,18 +58,25 @@ class CloudLoginFailure implements Exception {
 ///
 /// * channel `io.github.dey410.gardendlessloader/cloud_login`
 /// * method `authentikLogin`, arguments
-///   `{baseUrl: String, loginUrl: String, title: String}`
+///   `{baseUrl: String, loginUrl: String, title: String, allowedHosts: List<String>}`
 /// * result `null` when the user backed out, else
 ///   `{token: String, id: String, base: String}`
 ///
 /// The native side only accepts a token while the page is still on the host it
-/// opened, and only accepts a base URL on that same host.
+/// opened, and only accepts a base URL on that same host. `allowedHosts` carries
+/// the extra hosts the sign-in flow must be allowed to visit in-app — typically
+/// the identity provider, which lives on its own host. Without it every hop is
+/// handed to the system browser and the token bridge never fires.
 class CloudLoginService {
   const CloudLoginService();
 
   static const channelName = 'io.github.dey410.gardendlessloader/cloud_login';
   static const methodAuthentikLogin = 'authentikLogin';
   static const MethodChannel _channel = MethodChannel(channelName);
+
+  /// Maximum redirect hops followed while discovering the sign-in hosts.
+  static const _maxDiscoveryHops = 6;
+  static const _discoveryTimeout = Duration(seconds: 6);
 
   /// Returns null when the user closed the sign-in screen without signing in.
   Future<CloudLoginCredentials?> loginWithAuthentik({
@@ -83,6 +90,7 @@ class CloudLoginService {
         '当前平台不支持应用内登录，请在设置中手动填写令牌',
       );
     }
+    final allowedHosts = await discoverLoginHosts(baseUrl, loginUrl);
     try {
       final raw = await _channel.invokeMethod<Object?>(
         methodAuthentikLogin,
@@ -90,6 +98,7 @@ class CloudLoginService {
           'baseUrl': baseUrl,
           'loginUrl': loginUrl,
           'title': title,
+          'allowedHosts': allowedHosts,
         },
       );
       if (raw == null) return null;
@@ -103,5 +112,47 @@ class CloudLoginService {
         '当前安装包没有内置登录页面，请在设置中手动填写令牌',
       );
     }
+  }
+
+  /// Walks the sign-in redirect chain without following it in a browser and
+  /// returns every host the flow touches (the save server plus its identity
+  /// provider).
+  ///
+  /// Only `Location` headers are read; page bodies are discarded. Any failure
+  /// degrades to "only the save server host", which keeps the login usable when
+  /// the flow stays on one host and never leaks extra hosts to the native side.
+  Future<List<String>> discoverLoginHosts(String baseUrl, String loginUrl) async {
+    final hosts = <String>{};
+    final baseHost = Uri.tryParse(baseUrl)?.host.toLowerCase();
+    if (baseHost != null && baseHost.isNotEmpty) hosts.add(baseHost);
+
+    var url = Uri.tryParse(loginUrl);
+    if (url == null || !url.isScheme('http') && !url.isScheme('https')) {
+      return hosts.toList();
+    }
+
+    final client = HttpClient()..connectionTimeout = _discoveryTimeout;
+    try {
+      for (var hop = 0; hop < _maxDiscoveryHops; hop++) {
+        final host = url!.host.toLowerCase();
+        if (host.isEmpty) break;
+        hosts.add(host);
+        final request = await client.getUrl(url);
+        request.followRedirects = false;
+        final response = await request.close().timeout(_discoveryTimeout);
+        await response.drain<void>();
+        if (response.statusCode < 300 || response.statusCode >= 400) break;
+        final location = response.headers.value(HttpHeaders.locationHeader);
+        if (location == null || location.trim().isEmpty) break;
+        final next = url.resolve(location.trim());
+        if (!next.isScheme('http') && !next.isScheme('https')) break;
+        url = next;
+      }
+    } catch (_) {
+      // 探测失败不影响登录：至少允许存档服务器自身的 host
+    } finally {
+      client.close(force: true);
+    }
+    return hosts.toList();
   }
 }
