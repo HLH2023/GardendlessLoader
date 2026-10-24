@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider roots for the in-app APK update.
+
+  Only the app's own downloads folder is reachable, which is what
+  AppPaths.downloadsDir creates:
+    * getExternalFilesDir(null)/GardendlessLoader/downloads
+    * getApplicationDocumentsDirectory()/GardendlessLoader/downloads
+      (Flutter's app_flutter directory, reached from files/ with `..`)
+  Nothing else in the app's storage is exposed, and the provider is not
+  exported: a URI only reaches the installer through
+  FLAG_GRANT_READ_URI_PERMISSION on the install intent.
+-->
+<paths>
+    <external-files-path name="downloads" path="GardendlessLoader/downloads/" />
+    <files-path name="internal_downloads" path="../app_flutter/GardendlessLoader/downloads/" />
+</paths>

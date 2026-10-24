@@ -78,6 +78,18 @@ class UpdateCheckService {
     }
   }
 
+  /// The `applicationId` the installed APK was built with; [appBundleId] when
+  /// the platform cannot report it.
+  Future<String> loadInstalledPackageName() async {
+    try {
+      final name = (await PackageInfo.fromPlatform()).packageName.trim();
+      if (name.isNotEmpty) return name;
+    } catch (_) {
+      // Fall through to the compile-time constant.
+    }
+    return appBundleId;
+  }
+
   /// Returns the latest release version, and the release itself when it is
   /// newer than the installed version.
   Future<({String latestVersion, UpdateInfo? update})> checkForUpdate() async {

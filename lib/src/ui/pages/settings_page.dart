@@ -31,6 +31,8 @@ class SettingsPage extends StatelessWidget {
       left: [
         _LoaderPanel(controller: controller, actions: actions),
         const SizedBox(height: 16),
+        _AppUpdatePanel(controller: controller),
+        const SizedBox(height: 16),
         _LaunchPreferences(controller: controller),
         const SizedBox(height: 16),
         _SaveServerPanel(controller: controller),
@@ -160,6 +162,256 @@ class _LoaderPanel extends StatelessWidget {
               ],
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The in-app APK update: check the server's manifest, resume a download,
+/// verify its SHA-256 and hand it to the system installer.
+class _AppUpdatePanel extends StatelessWidget {
+  const _AppUpdatePanel({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.garden;
+    final strings = context.strings;
+    final status = controller.appUpdate;
+    final release = status.release;
+    final configured = controller.cloudServerConfigured;
+    final supported = controller.appUpdateInstallSupported;
+    final notes = release?.notes ?? '';
+    final (String stateText, Color? stateColor) = switch (status.phase) {
+      AppUpdatePhase.idle => (strings.appUpdateNotChecked, null),
+      AppUpdatePhase.checking => (strings.appUpdateChecking, null),
+      AppUpdatePhase.upToDate => (strings.upToDate, null),
+      AppUpdatePhase.available => (strings.updateAvailable, palette.accent),
+      AppUpdatePhase.downloading => (strings.appUpdateDownloading, null),
+      AppUpdatePhase.verifying => (strings.appUpdateVerifying, null),
+      AppUpdatePhase.ready => (strings.appUpdateReadyShort, palette.accent),
+      AppUpdatePhase.installing => (strings.appUpdateInstalling, null),
+      AppUpdatePhase.failed => (strings.appUpdateFailed, palette.danger),
+    };
+    final hintStyle = TextStyle(
+      color: palette.inkMuted,
+      fontSize: 12.5,
+      height: 1.5,
+    );
+    final showProgress = status.totalBytes > 0 &&
+        status.phase != AppUpdatePhase.idle &&
+        status.phase != AppUpdatePhase.checking &&
+        status.phase != AppUpdatePhase.upToDate;
+    final canDownload = supported &&
+        configured &&
+        !status.active &&
+        (status.phase == AppUpdatePhase.available ||
+            status.phase == AppUpdatePhase.failed) &&
+        release != null;
+    final canInstall = supported &&
+        !status.active &&
+        release != null &&
+        status.phase == AppUpdatePhase.ready;
+
+    return SurfaceCard(
+      key: const ValueKey('app-update'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PanelHeader(
+            title: strings.appUpdateTitle,
+            icon: Icons.system_update_alt_rounded,
+            trailing: StatusLabel(label: stateText, color: stateColor),
+          ),
+          const SizedBox(height: 8),
+          Text(strings.appUpdateSubtitle, style: hintStyle),
+          const SizedBox(height: 14),
+          MetricRow(
+            metrics: [
+              Metric(
+                label: strings.currentVersion,
+                value: 'v${controller.installedVersionName}',
+              ),
+              Metric(
+                label: strings.buildNumber,
+                value: controller.installedBuildNumber.isEmpty
+                    ? '--'
+                    : controller.installedBuildNumber,
+              ),
+            ],
+          ),
+          if (release != null) ...[
+            const SizedBox(height: 10),
+            InfoRow(
+              label: strings.appUpdateServerBuild,
+              value: '${release.version} · ${release.versionCode}',
+              mono: true,
+            ),
+            if (release.size > 0)
+              InfoRow(
+                label: strings.appUpdatePackage,
+                value: formatBytes(release.size),
+              ),
+          ],
+          if (status.phase == AppUpdatePhase.upToDate && release != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              strings.appUpdateUpToDate(
+                release.version,
+                '${release.versionCode}',
+              ),
+              style: hintStyle.copyWith(color: palette.ink),
+            ),
+          ],
+          if (status.phase == AppUpdatePhase.available && release != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              strings.appUpdateAvailable(
+                release.version,
+                '${release.versionCode}',
+              ),
+              style: hintStyle.copyWith(
+                color: palette.ink,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          if (notes.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              notes,
+              maxLines: 8,
+              overflow: TextOverflow.ellipsis,
+              style: hintStyle,
+            ),
+          ],
+          if (controller.appUpdateHint.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              controller.appUpdateHint,
+              style: hintStyle.copyWith(color: palette.warning),
+            ),
+          ],
+          if (showProgress) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: status.phase == AppUpdatePhase.ready ? 1 : status.value,
+                minHeight: 6,
+                backgroundColor: palette.surfaceMuted,
+                color: palette.accent,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              strings.downloadProgress(
+                formatBytes(status.receivedBytes),
+                formatBytes(status.totalBytes),
+              ),
+              style: hintStyle.copyWith(fontSize: 12.5),
+            ),
+            if (status.resumedBytes > 0 &&
+                status.phase == AppUpdatePhase.downloading) ...[
+              const SizedBox(height: 4),
+              Text(
+                strings.appUpdateResumed(formatBytes(status.resumedBytes)),
+                style: hintStyle.copyWith(fontSize: 12),
+              ),
+            ],
+          ],
+          if (status.phase == AppUpdatePhase.ready) ...[
+            const SizedBox(height: 8),
+            Text(
+              strings.appUpdateReady,
+              style: hintStyle.copyWith(color: palette.accent),
+            ),
+          ],
+          if (status.phase == AppUpdatePhase.failed) ...[
+            const SizedBox(height: 10),
+            Text(
+              strings.appUpdateError(status.errorCode, status.message),
+              style: hintStyle.copyWith(color: palette.danger, fontSize: 12.5),
+            ),
+            if (status.needsInstallPermission) ...[
+              const SizedBox(height: 6),
+              Text(
+                strings.appUpdatePermissionHint,
+                style: hintStyle.copyWith(color: palette.warning),
+              ),
+            ],
+          ],
+          if (!configured) ...[
+            const SizedBox(height: 10),
+            Text(
+              strings.appUpdateSignInFirst,
+              style: hintStyle.copyWith(color: palette.warning),
+            ),
+          ] else if (!supported) ...[
+            const SizedBox(height: 10),
+            Text(
+              strings.appUpdatePlatformUnsupported,
+              style: hintStyle.copyWith(color: palette.warning),
+            ),
+          ],
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              GardenButton(
+                key: const ValueKey('app-update-check'),
+                label: strings.appUpdateCheck,
+                icon: Icons.refresh_rounded,
+                tone: GardenButtonTone.ghost,
+                compact: true,
+                busy: status.phase == AppUpdatePhase.checking,
+                onPressed:
+                    status.active ? null : () => controller.checkAppUpdate(),
+              ),
+              if (status.downloading)
+                GardenButton(
+                  key: const ValueKey('app-update-cancel'),
+                  label: strings.cancelDownload,
+                  icon: Icons.close_rounded,
+                  tone: GardenButtonTone.danger,
+                  compact: true,
+                  onPressed: controller.cancelAppUpdateDownload,
+                )
+              else if (canInstall)
+                GardenButton(
+                  key: const ValueKey('app-update-install'),
+                  label: strings.appUpdateInstall,
+                  icon: Icons.install_mobile_rounded,
+                  tone: GardenButtonTone.primary,
+                  compact: true,
+                  onPressed: () => controller.installAppUpdate(),
+                )
+              else if (canDownload)
+                GardenButton(
+                  key: const ValueKey('app-update-download'),
+                  label: status.resumedBytes > 0
+                      ? strings.appUpdateResume
+                      : strings.appUpdateDownload,
+                  icon: Icons.download_rounded,
+                  tone: GardenButtonTone.primary,
+                  compact: true,
+                  busy: status.active,
+                  onPressed: () => controller.downloadAppUpdate(),
+                ),
+              if (status.needsInstallPermission)
+                GardenButton(
+                  key: const ValueKey('app-update-permission'),
+                  label: strings.appUpdateOpenPermissionSettings,
+                  icon: Icons.settings_outlined,
+                  compact: true,
+                  onPressed: () =>
+                      controller.openAppInstallPermissionSettings(),
+                ),
+            ],
+          ),
         ],
       ),
     );

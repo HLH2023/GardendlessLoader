@@ -104,6 +104,16 @@
 - After a successful fetch the feed is saved as `announcements.json` in the app root with every link fetched so far, so an offline start keeps those links and the last announcement and theme; before the first successful fetch the built-in links apply. When `raw.githubusercontent.com` fails the loader reads the same file from jsDelivr, which can lag behind GitHub; purge it at `https://purge.jsdelivr.net/gh/Dey410/GardendlessLoader@main/announcements.json` after an urgent change.
 - The first game launch after install shows the gesture hint at the bottom of the game: three touch mappings and the platform's way back. The first touch or click fades it; later launches never show it.
 
+## In-app APK update
+
+- Settings shows the installed `versionName` / `versionCode`; 检查更新 without a device token says to sign in to the save server first, and 检查更新 with a token whose manifest is not newer reports 已是最新（<version> / <versionCode>）.
+- With a newer manifest it shows the server version, package size, notes and server `hint`; 下载安装包 resumes bytes already in `downloads` (the resume note appears) and the progress bar reaches the announced size.
+- Killing the app mid-download and returning leaves the partial APK in place: the next 下载安装包 continues from it, and the finished file matches the manifest SHA-256 (a corrupted body is deleted and reported).
+- 取消下载 stops the transfer and keeps the bytes; the button then reads 继续下载.
+- 安装更新 with unknown sources not allowed opens `ACTION_MANAGE_UNKNOWN_APP_SOURCES` for this package, shows 请允许本应用安装未知应用后重试 and an 打开安装权限设置 button; after allowing, the retry opens the system installer.
+- The installer receives `content://io.github.dey410.gardendlessloader.fileprovider/...`, and the update installs over the existing app with the same signature and a higher versionCode.
+- A manifest whose `package` differs, whose `versionCode` is not newer, or whose SHA-256 no longer matches is refused with a readable reason and no installer intent.
+
 ## Failure paths
 
 - A ZIP without a valid `docs/index.html` rejects import and leaves the active slot unchanged.

@@ -116,6 +116,29 @@ const defaultLogEventSchemas = <String, LogEventSchema>{
       'accountKnown': LogContextValueType.boolean,
     },
   ),
+  'app_update_checked': LogEventSchema(
+    contextFields: <String, LogContextValueType>{
+      'installedVersion': LogContextValueType.text,
+      'installedCode': LogContextValueType.integer,
+      'latestVersion': LogContextValueType.text,
+      'latestCode': LogContextValueType.integer,
+      'updateAvailable': LogContextValueType.boolean,
+    },
+  ),
+  'app_update_download_finished': LogEventSchema(
+    contextFields: <String, LogContextValueType>{
+      'version': LogContextValueType.text,
+      'versionCode': LogContextValueType.integer,
+      'sizeBytes': LogContextValueType.integer,
+      'resumedBytes': LogContextValueType.integer,
+    },
+  ),
+  'app_update_install_requested': LogEventSchema(
+    contextFields: <String, LogContextValueType>{
+      'version': LogContextValueType.text,
+      'versionCode': LogContextValueType.integer,
+    },
+  ),
 };
 
 const userErrorCatalog = <String, UserLogError>{

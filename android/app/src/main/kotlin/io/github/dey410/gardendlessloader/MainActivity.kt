@@ -9,6 +9,7 @@ import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import io.github.dey410.gardendlessloader.appupdate.ApkInstaller
 import io.github.dey410.gardendlessloader.game.GameActivity
 import io.github.dey410.gardendlessloader.login.LoginActivity
 import io.github.dey410.gardendlessloader.login.LoginTokenPayload
@@ -40,6 +41,9 @@ class MainActivity : FlutterActivity() {
 
     /** The Flutter call waiting on the embedded sign-in screen, if any. */
     private var pendingLoginResult: MethodChannel.Result? = null
+
+    /** Serves downloaded APKs to the system installer through FileProvider. */
+    private val apkInstaller by lazy { ApkInstaller(this) }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -127,6 +131,28 @@ class MainActivity : FlutterActivity() {
                     error.message ?: error.toString(),
                     null,
                 )
+            }
+        }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "io.github.dey410.gardendlessloader/app_update",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "installApk" -> {
+                    val path = call.argument<String>("path").orEmpty()
+                    try {
+                        apkInstaller.install(path)
+                        result.success(null)
+                    } catch (failure: ApkInstaller.InstallFailure) {
+                        result.error(failure.code, failure.message, null)
+                    } catch (error: Exception) {
+                        result.error("install_failed", error.message ?: error.toString(), null)
+                    }
+                }
+                "installPermissionGranted" -> result.success(apkInstaller.canInstallPackages())
+                "openInstallPermissionSettings" ->
+                    result.success(apkInstaller.openUnknownSourcesSettings())
+                else -> result.notImplemented()
             }
         }
         val importChannel = MethodChannel(

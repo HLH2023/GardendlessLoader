@@ -16,8 +16,10 @@ import 'logging/log_event_catalog.dart';
 import 'models.dart';
 import 'services/about_content_service.dart';
 import 'services/announcement_service.dart';
+import 'services/app_install_service.dart';
 import 'services/app_paths_service.dart';
 import 'services/app_settings_store.dart';
+import 'services/app_update_service.dart';
 import 'services/cloud_login_service.dart';
 import 'services/diagnostics_service.dart';
 import 'services/garden_journal.dart';
@@ -57,9 +59,17 @@ class AppController extends ChangeNotifier {
   final ResourcePickerService _resourcePickerService = ResourcePickerService();
   final ShortcutService _shortcutService = ShortcutService();
   final RemoteResourceService _remoteResourceService = RemoteResourceService();
+  final AppInstallService _appInstallService = const AppInstallService();
+  late final AppUpdateService _appUpdateService = AppUpdateService(
+    _remoteResourceService,
+  );
   final CloudLoginService _cloudLoginService = const CloudLoginService();
   late final ImportService _importService;
   RemoteDownloadStatus _remoteDownload = RemoteDownloadStatus.idle;
+  AppUpdateStatus _appUpdate = AppUpdateStatus.idle;
+  AppUpdateManifest? _appUpdateManifest;
+  File? _appUpdateFile;
+  RemoteDownloadCancellation? _appUpdateCancellation;
   CloudLoginStatus _cloudLogin = CloudLoginStatus.idle;
   RemoteResourceManifest? _remoteManifest;
   ({String? code, String message})? _remoteManifestFailure;
@@ -222,6 +232,17 @@ class AppController extends ChangeNotifier {
 
   RemoteDownloadStatus get remoteDownload => _remoteDownload;
   RemoteResourceManifest? get remoteManifest => _remoteManifest;
+
+  /// Where the in-app APK update is: the server's release, the download and
+  /// the install request.
+  AppUpdateStatus get appUpdate => _appUpdate;
+
+  /// Server wording shown under the release, e.g. why an update cannot be
+  /// installed from inside the app.
+  String get appUpdateHint => _appUpdateManifest?.hint ?? '';
+
+  /// Only Android can hand a downloaded APK to the system installer.
+  bool get appUpdateInstallSupported => _appInstallService.supported;
   ({String? code, String message})? get remoteManifestFailure =>
       _remoteManifestFailure;
   bool get remoteManifestLoading => _remoteManifestLoading;
@@ -1710,6 +1731,445 @@ class AppController extends ChangeNotifier {
   void cancelRemoteDownload() {
     _remoteCancellation?.cancel();
     _remoteResourceService.abortActiveRequests();
+  }
+
+  /// Fetches the APK manifest with the device token and compares its
+  /// versionCode with the installed build.
+  Future<void> checkAppUpdate() async {
+    if (_appUpdate.phase == AppUpdatePhase.checking || _appUpdate.active) {
+      return;
+    }
+    final strings = AppStrings.current;
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) {
+      _appUpdate = AppUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: _appUpdate.release,
+        errorCode:
+            base.isEmpty ? 'save_server_invalid' : 'app_update_not_signed_in',
+        message: strings.saveServerNotConfigured,
+      );
+      notifyListeners();
+      return;
+    }
+
+    _appUpdate = AppUpdateStatus(
+      phase: AppUpdatePhase.checking,
+      release: _appUpdate.release,
+    );
+    notifyListeners();
+    final stopwatch = Stopwatch()..start();
+    try {
+      await _loadCurrentAppVersion();
+      final installed = InstalledAppBuild(
+        versionName: _installedVersionName,
+        buildNumber: _installedBuildNumber,
+      );
+      final result = await _appUpdateService.check(
+        token: token,
+        baseUrl: base,
+        installedVersionCode: parseVersionCode(installed.buildNumber),
+        installedVersionName: installed.versionName,
+      );
+      _appUpdateManifest = result.manifest;
+      final release = result.release;
+      _appUpdateFile = null;
+      if (!result.isUpgrade) {
+        _appUpdate = AppUpdateStatus(
+          phase: AppUpdatePhase.upToDate,
+          release: release,
+          totalBytes: release.size,
+        );
+      } else {
+        // A previous run may have finished (or half finished) the bytes.
+        final target = _appUpdateService.targetFile(
+          _requirePaths().downloadsDir,
+          release,
+        );
+        final onDisk = await _appUpdateService.partialBytes(target, release);
+        final complete = release.size > 0 &&
+            onDisk == release.size &&
+            await _appUpdateService.verifyFile(target, release);
+        if (complete) {
+          _appUpdateFile = target;
+        }
+        _appUpdate = AppUpdateStatus(
+          phase: complete ? AppUpdatePhase.ready : AppUpdatePhase.available,
+          release: release,
+          receivedBytes: onDisk,
+          totalBytes: release.size,
+          resumedBytes: onDisk,
+        );
+      }
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'app.update',
+        event: 'app_update_checked',
+        outcome: LogOutcome.succeeded,
+        durationMs: stopwatch.elapsedMilliseconds,
+        context: <String, Object?>{
+          'installedVersion': installed.versionName,
+          'installedCode': parseVersionCode(installed.buildNumber),
+          'latestVersion': release.version,
+          'latestCode': release.versionCode,
+          'updateAvailable': result.isUpgrade,
+        },
+      );
+    } on RemoteResourceFailure catch (failure) {
+      _appUpdate = AppUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: _appUpdate.release,
+        errorCode: failure.code,
+        message: failure.message,
+      );
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'app.update',
+        event: 'app_update_checked',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        message: failure.message,
+        durationMs: stopwatch.elapsedMilliseconds,
+      );
+    } catch (error, stackTrace) {
+      _appUpdate = AppUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: _appUpdate.release,
+        errorCode: 'app_update_check_failed',
+        message: '$error',
+      );
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'app.update',
+        event: 'app_update_checked',
+        outcome: LogOutcome.failed,
+        code: 'app_update_check_failed',
+        error: error,
+        stackTrace: stackTrace,
+        durationMs: stopwatch.elapsedMilliseconds,
+      );
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  /// Downloads the release the last check found, resuming whatever an earlier
+  /// attempt left in the downloads folder, and verifies its SHA-256.
+  Future<void> downloadAppUpdate() async {
+    final release = _appUpdate.release;
+    if (release == null || _appUpdate.active) return;
+    if (_appUpdate.phase == AppUpdatePhase.upToDate) {
+      // Nothing to download: the server's build is not newer than this one.
+      return;
+    }
+    final strings = AppStrings.current;
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) {
+      _appUpdate = _appUpdate.copyWith(
+        phase: AppUpdatePhase.failed,
+        errorCode: 'app_update_not_signed_in',
+        message: strings.saveServerNotConfigured,
+      );
+      notifyListeners();
+      return;
+    }
+    if (!_appInstallService.supported) {
+      _appUpdate = _appUpdate.copyWith(
+        phase: AppUpdatePhase.failed,
+        errorCode: 'install_unsupported',
+        message: 'In-app installation is only implemented on Android',
+      );
+      notifyListeners();
+      return;
+    }
+
+    final File target;
+    final Directory downloadsDir;
+    final int onDisk;
+    try {
+      downloadsDir = _requirePaths().downloadsDir;
+      await downloadsDir.create(recursive: true);
+      target = _appUpdateService.targetFile(downloadsDir, release);
+      onDisk = await _appUpdateService.partialBytes(target, release);
+    } catch (error, stackTrace) {
+      _appUpdate = _appUpdate.copyWith(
+        phase: AppUpdatePhase.failed,
+        errorCode: 'app_update_download_failed',
+        message: '$error',
+      );
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'app.update',
+        event: 'app_update_download_finished',
+        outcome: LogOutcome.failed,
+        code: 'app_update_download_failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      notifyListeners();
+      return;
+    }
+
+    final cancellation = RemoteDownloadCancellation();
+    _appUpdateCancellation = cancellation;
+    _appUpdate = AppUpdateStatus(
+      phase: AppUpdatePhase.downloading,
+      release: release,
+      receivedBytes: onDisk,
+      totalBytes: release.size,
+      resumedBytes: onDisk,
+    );
+    notifyListeners();
+    final stopwatch = Stopwatch()..start();
+    var lastProgressNotify = DateTime.fromMillisecondsSinceEpoch(0);
+
+    try {
+      if (release.size > 0 &&
+          onDisk == release.size &&
+          await _appUpdateService.verifyFile(target, release)) {
+        // A previous attempt already finished and verified these bytes.
+        _appUpdateFile = target;
+      } else {
+        // A file longer than announced cannot be a prefix of the APK.
+        if (onDisk >= release.size) {
+          await _appUpdateService.discard(target);
+        }
+        final file = await _appUpdateService.downloadRelease(
+          release: release,
+          token: token,
+          baseUrl: base,
+          targetFile: target,
+          cancellation: cancellation,
+          onProgress: (progress) {
+            final now = DateTime.now();
+            if (now.difference(lastProgressNotify) <
+                const Duration(milliseconds: 200)) {
+              return;
+            }
+            lastProgressNotify = now;
+            final total =
+                progress.totalBytes > 0 ? progress.totalBytes : release.size;
+            _appUpdate = AppUpdateStatus(
+              phase: progress.receivedBytes >= total && total > 0
+                  ? AppUpdatePhase.verifying
+                  : AppUpdatePhase.downloading,
+              release: release,
+              receivedBytes: progress.receivedBytes,
+              totalBytes: total,
+              resumedBytes: onDisk,
+            );
+            notifyListeners();
+          },
+        );
+        _appUpdateFile = file;
+      }
+      _appUpdate = AppUpdateStatus(
+        phase: AppUpdatePhase.ready,
+        release: release,
+        receivedBytes: release.size,
+        totalBytes: release.size,
+        resumedBytes: onDisk,
+      );
+      await _appUpdateService.removeStaleApks(downloadsDir, target);
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'app.update',
+        event: 'app_update_download_finished',
+        outcome: LogOutcome.succeeded,
+        durationMs: stopwatch.elapsedMilliseconds,
+        context: <String, Object?>{
+          'version': release.version,
+          'versionCode': release.versionCode,
+          'sizeBytes': release.size,
+          'resumedBytes': onDisk,
+        },
+      );
+    } on RemoteResourceCancelled {
+      final kept = await _appUpdateService.partialBytes(target, release);
+      _appUpdate = AppUpdateStatus(
+        phase: AppUpdatePhase.available,
+        release: release,
+        receivedBytes: kept,
+        totalBytes: release.size,
+        resumedBytes: kept,
+        message: strings.remoteDownloadCancelled,
+      );
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'app.update',
+        event: 'app_update_download_finished',
+        outcome: LogOutcome.cancelled,
+        durationMs: stopwatch.elapsedMilliseconds,
+        context: <String, Object?>{
+          'version': release.version,
+          'versionCode': release.versionCode,
+          'resumedBytes': kept,
+        },
+      );
+    } on RemoteResourceFailure catch (failure) {
+      final kept = await _appUpdateService.partialBytes(target, release);
+      _appUpdate = AppUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: release,
+        receivedBytes: kept,
+        totalBytes: release.size,
+        resumedBytes: kept,
+        errorCode: failure.code,
+        message: failure.message,
+      );
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'app.update',
+        event: 'app_update_download_finished',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        message: failure.message,
+        durationMs: stopwatch.elapsedMilliseconds,
+      );
+    } catch (error, stackTrace) {
+      _appUpdate = _appUpdate.copyWith(
+        phase: AppUpdatePhase.failed,
+        errorCode: 'app_update_download_failed',
+        message: '$error',
+      );
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'app.update',
+        event: 'app_update_download_finished',
+        outcome: LogOutcome.failed,
+        code: 'app_update_download_failed',
+        error: error,
+        stackTrace: stackTrace,
+        durationMs: stopwatch.elapsedMilliseconds,
+      );
+    } finally {
+      _appUpdateCancellation = null;
+      notifyListeners();
+    }
+  }
+
+  /// Stops a running APK download; the bytes on disk stay for a resume.
+  void cancelAppUpdateDownload() {
+    _appUpdateCancellation?.cancel();
+    _remoteResourceService.abortActiveRequests();
+  }
+
+  /// Re-checks everything the server promised before opening the installer:
+  /// the manifest's package is this app, its versionCode is newer than the
+  /// installed one, and the file still hashes to the published SHA-256.
+  Future<void> installAppUpdate() async {
+    final release = _appUpdate.release;
+    final file = _appUpdateFile;
+    if (release == null || file == null) {
+      _appUpdate = _appUpdate.copyWith(
+        phase: AppUpdatePhase.failed,
+        errorCode: 'app_update_not_downloaded',
+      );
+      notifyListeners();
+      return;
+    }
+    if (!_appInstallService.supported) {
+      _appUpdate = _appUpdate.copyWith(
+        phase: AppUpdatePhase.failed,
+        errorCode: 'install_unsupported',
+        message: 'In-app installation is only implemented on Android',
+      );
+      notifyListeners();
+      return;
+    }
+
+    final installed = await _updateCheckService.loadInstalledBuild();
+    final installedPackage =
+        await _updateCheckService.loadInstalledPackageName();
+    if (release.packageName != installedPackage) {
+      _appUpdate = _appUpdate.copyWith(
+        phase: AppUpdatePhase.failed,
+        errorCode: 'app_update_package_mismatch',
+        message: '${release.packageName} != $installedPackage',
+      );
+      notifyListeners();
+      return;
+    }
+    final installedCode = parseVersionCode(installed.buildNumber);
+    final newer = installedCode != null
+        ? release.versionCode > installedCode
+        : compareVersionNames(release.version, installed.versionName) > 0;
+    if (!newer) {
+      _appUpdate = _appUpdate.copyWith(
+        phase: AppUpdatePhase.failed,
+        errorCode: 'app_update_not_newer',
+        message: '${release.version} / ${release.versionCode} '
+            'vs ${installed.versionName} / ${installed.buildNumber}',
+      );
+      notifyListeners();
+      return;
+    }
+    if (!await _appUpdateService.verifyFile(file, release)) {
+      await _appUpdateService.discard(file);
+      _appUpdateFile = null;
+      _appUpdate = _appUpdate.copyWith(
+        phase: AppUpdatePhase.failed,
+        errorCode: 'app_update_checksum_mismatch',
+      );
+      notifyListeners();
+      return;
+    }
+
+    _appUpdate = _appUpdate.copyWith(
+      phase: AppUpdatePhase.installing,
+      receivedBytes: release.size,
+      totalBytes: release.size,
+    );
+    notifyListeners();
+    final stopwatch = Stopwatch()..start();
+    try {
+      await _appInstallService.installApk(file.path);
+      _appUpdate = _appUpdate.copyWith(phase: AppUpdatePhase.ready);
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'app.update',
+        event: 'app_update_install_requested',
+        outcome: LogOutcome.succeeded,
+        durationMs: stopwatch.elapsedMilliseconds,
+        context: <String, Object?>{
+          'version': release.version,
+          'versionCode': release.versionCode,
+        },
+      );
+    } on AppInstallFailure catch (failure) {
+      _appUpdate = _appUpdate.copyWith(
+        phase: AppUpdatePhase.failed,
+        errorCode: failure.code,
+        message: failure.message,
+        needsInstallPermission:
+            failure.code == AppInstallService.permissionRequiredCode,
+      );
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'app.update',
+        event: 'app_update_install_requested',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        message: failure.message,
+        durationMs: stopwatch.elapsedMilliseconds,
+      );
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  /// Opens the system screen that grants this package the right to install
+  /// APKs (Android 8+).
+  Future<void> openAppInstallPermissionSettings() async {
+    final opened = await _appInstallService.openPermissionSettings();
+    if (!opened) {
+      _message = LauncherMessage(
+        AppStrings.current.appUpdatePermissionSettingsUnavailable,
+      );
+      notifyListeners();
+    }
   }
 
   /// Hosts the game may open outside the WebView. The save server joins them

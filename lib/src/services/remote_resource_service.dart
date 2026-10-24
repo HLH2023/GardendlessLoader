@@ -268,6 +268,35 @@ class RemoteResourceService {
     );
   }
 
+  /// `GET {base}{path}` with the device token attached, as text.
+  ///
+  /// A caller that publishes its own document format (the APK manifest) uses
+  /// this instead of duplicating authentication, timeout, size cap and
+  /// address redaction.
+  Future<String> fetchAuthorizedText({
+    required String path,
+    required String token,
+    required String baseUrl,
+    required String code,
+    int maxBytes = saveServerManifestMaxBytes,
+    Duration timeout = saveServerRequestTimeout,
+    String accept = 'application/json, */*',
+  }) {
+    return _getText(
+      _resolve(baseUrl, path),
+      token: token,
+      timeout: timeout,
+      maxBytes: maxBytes,
+      code: code,
+      accept: accept,
+    );
+  }
+
+  /// Joins a server-published relative path onto [baseUrl], keeping any path
+  /// prefix the server is mounted under. A caller that hands the result to
+  /// [downloadFile] resolves it the same way every other request is resolved.
+  Uri resolveServerUri(String baseUrl, String path) => _resolve(baseUrl, path);
+
   /// Downloads the manifest's latest ZIP into [targetFile], resuming from the
   /// bytes already on disk when the server honours `Range`.
   ///
@@ -288,7 +317,39 @@ class RemoteResourceService {
         '服务器没有可用资源包',
       );
     }
-    final uri = _resolve(baseUrl, zip.urlApp);
+    return downloadFile(
+      uri: _resolve(baseUrl, zip.urlApp),
+      token: token,
+      targetFile: targetFile,
+      expectedSize: zip.size,
+      expectedSha256: zip.sha256,
+      cancellation: cancellation,
+      onProgress: onProgress,
+    );
+  }
+
+  /// Downloads any file the save server publishes, resuming from the bytes
+  /// already on [targetFile] when the server honours `Range`.
+  ///
+  /// This is the one resumable-transfer implementation: the resource ZIP and
+  /// the in-app APK update both go through it. The bytes on disk are appended
+  /// to only after the server confirms the range, and the finished file must
+  /// match [expectedSize] and [expectedSha256]; either mismatch deletes it, so
+  /// a resumed transfer can never be mistaken for a good one. [detailLabel]
+  /// only names the file in those two error details.
+  Future<File> downloadFile({
+    required Uri uri,
+    required String token,
+    required File targetFile,
+    required int expectedSize,
+    required String expectedSha256,
+    String failureCode = 'resource_download_failed',
+    String sizeMismatchCode = 'resource_size_mismatch',
+    String checksumMismatchCode = 'resource_checksum_mismatch',
+    String detailLabel = '资源',
+    RemoteDownloadCancellation? cancellation,
+    void Function(RemoteDownloadProgress progress)? onProgress,
+  }) async {
     final etagFile = File('${targetFile.path}.etag');
     await targetFile.parent.create(recursive: true);
 
@@ -302,7 +363,8 @@ class RemoteResourceService {
           targetFile: targetFile,
           etagFile: etagFile,
           resumeFrom: resumeFrom,
-          expectedSize: zip.size,
+          expectedSize: expectedSize,
+          failureCode: failureCode,
           cancellation: cancellation,
           onProgress: onProgress,
         );
@@ -312,8 +374,8 @@ class RemoteResourceService {
         await _deleteQuietly(targetFile);
         await _deleteQuietly(etagFile);
         if (attempt >= 1) {
-          throw const RemoteResourceFailure(
-            'resource_download_failed',
+          throw RemoteResourceFailure(
+            failureCode,
             '服务器拒绝断点续传，重新下载仍失败',
           );
         }
@@ -322,26 +384,33 @@ class RemoteResourceService {
     }
 
     final length = await targetFile.length();
-    if (zip.size > 0 && length != zip.size) {
+    if (expectedSize > 0 && length != expectedSize) {
       await _deleteQuietly(targetFile);
       await _deleteQuietly(etagFile);
       throw RemoteResourceFailure(
-        'resource_size_mismatch',
-        '资源大小不符：$length / ${zip.size}',
+        sizeMismatchCode,
+        '$detailLabel大小不符：$length / $expectedSize',
       );
     }
 
     final digest = await sha256.bind(targetFile.openRead()).first;
-    if (digest.toString() != zip.sha256) {
+    if (digest.toString() != expectedSha256.toLowerCase()) {
       await _deleteQuietly(targetFile);
       await _deleteQuietly(etagFile);
-      throw const RemoteResourceFailure(
-        'resource_checksum_mismatch',
-        '资源校验失败（SHA-256 不一致）',
+      throw RemoteResourceFailure(
+        checksumMismatchCode,
+        '$detailLabel校验失败（SHA-256 不一致）',
       );
     }
     await _deleteQuietly(etagFile);
     return targetFile;
+  }
+
+  /// Removes a partial or rejected download and the ETag beside it, so the
+  /// next attempt starts from byte zero.
+  Future<void> discardDownload(File targetFile) async {
+    await _deleteQuietly(targetFile);
+    await _deleteQuietly(File('${targetFile.path}.etag'));
   }
 
   Future<void> _downloadAttempt({
@@ -351,6 +420,7 @@ class RemoteResourceService {
     required File etagFile,
     required int resumeFrom,
     required int expectedSize,
+    required String failureCode,
     RemoteDownloadCancellation? cancellation,
     void Function(RemoteDownloadProgress progress)? onProgress,
   }) async {
@@ -396,7 +466,7 @@ class RemoteResourceService {
         throw const _RangeRejected();
       } else {
         await response.drain<void>();
-        throw _statusFailure(status, 'resource_download_failed');
+        throw _statusFailure(status, failureCode);
       }
 
       final etag = response.headers.value(HttpHeaders.etagHeader);
@@ -434,7 +504,7 @@ class RemoteResourceService {
         throw const RemoteResourceCancelled();
       }
       throw RemoteResourceFailure(
-        'resource_download_failed',
+        failureCode,
         _redact(error.message, uri),
       );
     } on HttpException catch (error) {
@@ -442,7 +512,7 @@ class RemoteResourceService {
         throw const RemoteResourceCancelled();
       }
       throw RemoteResourceFailure(
-        'resource_download_failed',
+        failureCode,
         _redact(error.message, uri),
       );
     } finally {

@@ -26,6 +26,9 @@ const saveServerRequestTimeout = Duration(seconds: 20); // 服务器请求（清
 const saveLoginPagePath = '/_save/app.html'; // 令牌签发页；浏览器打开时是手动复制模式
 const saveLoginBridgeQuery = 'bridge=1'; // 应用内登录：页面通过 GardendlessBridge 回传令牌
 const saveWhoamiPath = '/_save/app/whoami'; // 校验设备令牌，返回 {"user": "..."}
+const saveApkManifestPath =
+    '/_save/app/res/apk/manifest.json'; // 应用内更新的 APK 清单，带 Bearer 令牌请求
+const saveApkManifestMaxBytes = 64 * 1024; // APK 清单最大响应体，64KB
 const saveServerDownloadConnectTimeout = Duration(seconds: 20); // 资源下载建立连接的超时时间
 const saveServerManifestMaxBytes = 512 * 1024; // 资源清单最大响应体，512KB
 const saveServerScriptMaxBytes = 2 * 1024 * 1024; // 注入脚本最大响应体，2MB

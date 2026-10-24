@@ -61,5 +61,7 @@ flutter {
 
 dependencies {
     implementation "androidx.webkit:webkit:1.12.1"
+    // FileProvider, for handing a downloaded APK to the system installer.
+    implementation "androidx.core:core:1.13.1"
     testImplementation "junit:junit:4.13.2"
 }

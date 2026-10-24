@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'constants.dart';
+import 'services/app_update_service.dart';
 
 enum ResourceStatus { missing, valid, invalid, ready }
 
@@ -546,6 +547,94 @@ class RemoteDownloadStatus {
 
 /// State of the in-app authentik sign-in, as the Settings page shows it.
 enum CloudLoginPhase { idle, opening, verifying, succeeded, failed }
+
+/// The steps the in-app APK update control moves through.
+///
+/// `available` also covers an interrupted download: the bytes already on disk
+/// stay there, so the page offers a resume instead of a fresh transfer.
+enum AppUpdatePhase {
+  idle,
+  checking,
+  upToDate,
+  available,
+  downloading,
+  verifying,
+  ready,
+  installing,
+  failed,
+}
+
+/// What the Settings page needs to render the in-app APK update.
+class AppUpdateStatus {
+  const AppUpdateStatus({
+    required this.phase,
+    this.release,
+    this.receivedBytes = 0,
+    this.totalBytes = 0,
+    this.resumedBytes = 0,
+    this.errorCode,
+    this.message,
+    this.needsInstallPermission = false,
+  });
+
+  static const idle = AppUpdateStatus(phase: AppUpdatePhase.idle);
+
+  final AppUpdatePhase phase;
+
+  /// The server's release once a check succeeded; kept through a failure so a
+  /// retry still knows what to download.
+  final AppRelease? release;
+  final int receivedBytes;
+  final int totalBytes;
+
+  /// Bytes already on disk when this attempt started, for the resume note.
+  final int resumedBytes;
+
+  /// Error-catalog code when [phase] is failed.
+  final String? errorCode;
+
+  /// Detail for a failure or a completed step.
+  final String? message;
+
+  /// Android 8+ refused the install because unknown sources are not allowed
+  /// for this package yet; the page offers the settings shortcut.
+  final bool needsInstallPermission;
+
+  bool get active =>
+      phase == AppUpdatePhase.downloading ||
+      phase == AppUpdatePhase.verifying ||
+      phase == AppUpdatePhase.installing;
+
+  bool get downloading => phase == AppUpdatePhase.downloading;
+
+  double? get value =>
+      totalBytes > 0 ? (receivedBytes / totalBytes).clamp(0.0, 1.0) : null;
+
+  /// A copy with the named fields replaced. [errorCode] and [message] are not
+  /// carried over: every new phase starts without the previous failure's text.
+  AppUpdateStatus copyWith({
+    AppUpdatePhase? phase,
+    AppRelease? release,
+    int? receivedBytes,
+    int? totalBytes,
+    int? resumedBytes,
+    String? errorCode,
+    String? message,
+    bool? needsInstallPermission,
+  }) {
+    return AppUpdateStatus(
+      phase: phase ?? this.phase,
+      release: release ?? this.release,
+      receivedBytes: receivedBytes ?? this.receivedBytes,
+      totalBytes: totalBytes ?? this.totalBytes,
+      resumedBytes: resumedBytes ?? this.resumedBytes,
+      errorCode: errorCode,
+      message: message,
+      needsInstallPermission:
+          needsInstallPermission ?? this.needsInstallPermission,
+    );
+  }
+}
 
 /// Where the embedded sign-in screen is, and why it last failed.
 class CloudLoginStatus {

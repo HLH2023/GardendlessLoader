@@ -222,6 +222,151 @@ class AppStrings {
   String get cloudDriveUpdate => _t('网盘更新', 'Update from cloud drive');
   String get viewGithubRelease => _t('查看 GitHub Release', 'GitHub release');
 
+  // Settings page: in-app APK update.
+  String get appUpdateTitle => _t('应用内更新', 'In-app update');
+  String get appUpdateSubtitle => _t(
+        '从云存档服务器下载新的安装包并交给系统安装器，支持断点续传与 SHA-256 校验。',
+        'Download a new build from the save server and hand it to the system '
+            'installer; the transfer resumes and every download is verified '
+            'with SHA-256.',
+      );
+  String get appUpdateCheck => _t('检查更新', 'Check for updates');
+  String get appUpdateChecking => _t('正在检查更新…', 'Checking for updates…');
+  String get appUpdateNotChecked => _t('尚未检查', 'Not checked');
+  String get appUpdateInstalledBuild => _t('当前构建', 'Installed build');
+  String get appUpdateServerBuild => _t('服务器版本', 'Server build');
+  String appUpdateUpToDate(String version, String build) =>
+      _t('已是最新（$version / $build）', 'Up to date ($version / $build)');
+  String appUpdateAvailable(String version, String build) =>
+      _t('新版本 $version（$build）', 'Version $version ($build)');
+  String get appUpdateNotes => _t('更新说明', 'Release notes');
+  String get appUpdatePackage => _t('安装包', 'Package');
+  String get appUpdateDownload => _t('下载安装包', 'Download');
+  String get appUpdateResume => _t('继续下载', 'Resume download');
+  String get appUpdateInstall => _t('安装更新', 'Install update');
+  String appUpdateResumed(String bytes) =>
+      _t('已续传 $bytes', 'Resumed from $bytes');
+  String get appUpdateVerifying => _t('正在校验安装包…', 'Verifying the package…');
+  String get appUpdateDownloading => _t('正在下载', 'Downloading');
+  String get appUpdateInstalling =>
+      _t('正在打开系统安装器…', 'Opening the system installer…');
+  String get appUpdateReady =>
+      _t('已下载并通过 SHA-256 校验。', 'Downloaded and SHA-256 verified.');
+  String get appUpdateReadyShort => _t('可安装', 'Ready');
+  String get appUpdateInstallerOpened => _t(
+        '已打开系统安装器，请按系统提示确认安装。',
+        'The system installer is open; confirm the install there.',
+      );
+  String get appUpdateFailed => _t('更新失败', 'Update failed');
+  String get appUpdateSignInFirst => _t(
+        '请先在下方登录云存档服务器，再检查应用内更新。',
+        'Sign in to the save server below before checking for in-app updates.',
+      );
+  String get appUpdatePlatformUnsupported => _t(
+        '当前平台不支持应用内安装。',
+        'In-app installation is not available on this platform.',
+      );
+  String get appUpdatePermissionHint => _t(
+        '请允许本应用安装未知应用后重试。',
+        'Allow this app to install unknown apps, then try again.',
+      );
+  String get appUpdateOpenPermissionSettings =>
+      _t('打开安装权限设置', 'Open install permissions');
+  String get appUpdatePermissionSettingsUnavailable => _t(
+        '无法打开系统设置，请手动允许本应用安装未知应用。',
+        'Could not open the system settings; allow this app to install '
+            'unknown apps manually.',
+      );
+
+  /// A readable sentence for an app-update failure [code]; [detail] is the
+  /// host's own wording (numbers, a package name) and only appears where the
+  /// sentence has room for it.
+  String appUpdateError(String? code, String? detail) {
+    final extra = detail == null || detail.trim().isEmpty ? '' : detail;
+    return switch (code) {
+      'app_update_not_signed_in' => _t(
+          '尚未登录云存档服务器，无法检查更新。',
+          'Not signed in to the save server, so the update cannot be checked.',
+        ),
+      'save_server_invalid' => _t(
+          '服务器地址无效或未填写。',
+          'The server address is missing or invalid.',
+        ),
+      'save_token_rejected' => _t(
+          '服务器拒绝了设备令牌，请重新登录。',
+          'The server rejected the device token; sign in again.',
+        ),
+      'app_update_manifest_unavailable' => _t(
+          '无法获取更新清单${extra.isEmpty ? '' : '（$extra）'}。',
+          'Could not fetch the update manifest${extra.isEmpty ? '' : ' ($extra)'}.',
+        ),
+      'app_update_manifest_invalid' => _t(
+          '更新清单格式无效${extra.isEmpty ? '' : '（$extra）'}。',
+          'The update manifest is invalid${extra.isEmpty ? '' : ' ($extra)'}.',
+        ),
+      'app_update_manifest_empty' => _t(
+          '服务器还没有发布安装包。',
+          'The server has not published a build yet.',
+        ),
+      'app_update_download_failed' => _t(
+          '下载安装包失败${extra.isEmpty ? '' : '（$extra）'}。',
+          'Downloading the package failed${extra.isEmpty ? '' : ' ($extra)'}.',
+        ),
+      'app_update_size_mismatch' => _t(
+          '安装包大小不符（$extra），已删除，请重新下载。',
+          'The package size does not match ($extra); it was deleted, download '
+              'it again.',
+        ),
+      'app_update_checksum_mismatch' => _t(
+          'SHA-256 校验未通过，已删除安装包，请重新下载。',
+          'The SHA-256 check failed; the package was deleted, download it again.',
+        ),
+      'app_update_not_downloaded' => _t(
+          '请先下载安装包。',
+          'Download the package first.',
+        ),
+      'app_update_package_mismatch' => _t(
+          '清单中的包名与本应用不一致，已拒绝安装。',
+          'The manifest names a different package, so the install was refused.',
+        ),
+      'app_update_not_newer' => _t(
+          '清单版本不比已安装版本新，已拒绝安装。',
+          'The manifest is not newer than the installed build, so the install '
+              'was refused.',
+        ),
+      'app_update_check_failed' => _t(
+          '检查更新失败${extra.isEmpty ? '' : '（$extra）'}。',
+          'Checking for updates failed${extra.isEmpty ? '' : ' ($extra)'}.',
+        ),
+      'install_permission_required' => _t(
+          '系统还没有允许本应用安装未知应用，请授权后重试。',
+          'Android has not allowed this app to install unknown apps; grant it '
+              'and try again.',
+        ),
+      'install_file_missing' => _t(
+          '安装包文件不存在，请重新下载。',
+          'The downloaded package is missing; download it again.',
+        ),
+      'install_file_invalid' => _t(
+          '安装包路径无效，已拒绝安装。',
+          'The package path is not allowed, so the install was refused.',
+        ),
+      'install_no_installer' => _t(
+          '系统里没有可用的安装器。',
+          'No package installer is available on this device.',
+        ),
+      'install_failed' => _t(
+          '无法打开系统安装器${extra.isEmpty ? '' : '（$extra）'}。',
+          'The system installer could not be opened${extra.isEmpty ? '' : ' ($extra)'}.',
+        ),
+      'install_unsupported' => _t(
+          '当前平台不支持应用内安装。',
+          'In-app installation is not available here.',
+        ),
+      _ => extra.isEmpty ? _t('未知错误。', 'Unknown error.') : extra,
+    };
+  }
+
   // Settings page: launch preferences.
   String get launchPreferences => _t('启动偏好', 'Launch Preferences');
   String get appliesNextLaunch => _t('下次启动生效', 'Applies next launch');
