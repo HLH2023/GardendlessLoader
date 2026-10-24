@@ -126,7 +126,7 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                     return@setMethodCallHandler
                 }
-                "pickAndExtractDocsZip", "extractIncomingDocsZip" -> Unit
+                "pickAndExtractDocsZip", "extractIncomingDocsZip", "extractLocalZip" -> Unit
                 else -> {
                     result.notImplemented()
                     return@setMethodCallHandler
@@ -148,6 +148,23 @@ class MainActivity : FlutterActivity() {
                 val uri = incomingZip
                 incomingZip = null
                 if (uri == null) result.success(null) else extractInBackground(uri, targetDirectory, result)
+                return@setMethodCallHandler
+            }
+
+            // A ZIP the launcher downloaded itself: same extraction as a
+            // picked one, read straight from its app-private file.
+            if (call.method == "extractLocalZip") {
+                val zipPath = call.argument<String>("zipPath")
+                if (zipPath.isNullOrBlank()) {
+                    result.error("invalid_zip_path", "缺少 ZIP 路径", null)
+                    return@setMethodCallHandler
+                }
+                val zipFile = File(zipPath)
+                if (!zipFile.isFile) {
+                    result.error("zip_not_found", "下载的资源包不存在", null)
+                    return@setMethodCallHandler
+                }
+                extractInBackground(Uri.fromFile(zipFile), targetDirectory, result)
                 return@setMethodCallHandler
             }
 

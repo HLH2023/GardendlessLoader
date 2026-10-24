@@ -56,6 +56,10 @@ class AppPaths {
   Directory get gpNextDir =>
       Directory('${root.path}${Platform.pathSeparator}gp-next');
 
+  /// Where the save server's resource ZIPs are downloaded and resumed from.
+  Directory get downloadsDir =>
+      Directory('${root.path}${Platform.pathSeparator}downloads');
+
   Directory get legacyImportDir =>
       Directory('${root.path}${Platform.pathSeparator}import');
   Directory get legacyCurrentDir =>
@@ -494,6 +498,50 @@ class ImportProgress {
       errorCode: errorCode,
     );
   }
+}
+
+/// The steps the "download the latest resources from the server" control
+/// moves through, so the page can show progress without owning the flow.
+enum RemoteDownloadPhase {
+  idle,
+  downloading,
+  importing,
+  completed,
+  failed,
+}
+
+class RemoteDownloadStatus {
+  const RemoteDownloadStatus({
+    required this.phase,
+    this.version,
+    this.receivedBytes = 0,
+    this.totalBytes = 0,
+    this.errorCode,
+    this.message,
+  });
+
+  static const idle = RemoteDownloadStatus(phase: RemoteDownloadPhase.idle);
+
+  final RemoteDownloadPhase phase;
+
+  /// Game version the manifest describes.
+  final String? version;
+  final int receivedBytes;
+  final int totalBytes;
+
+  /// Error-catalog code when [phase] is failed.
+  final String? errorCode;
+
+  /// Detail for a failure, shown under the progress bar.
+  final String? message;
+
+  /// A download or its import is running.
+  bool get active =>
+      phase == RemoteDownloadPhase.downloading ||
+      phase == RemoteDownloadPhase.importing;
+
+  double? get value =>
+      totalBytes > 0 ? (receivedBytes / totalBytes).clamp(0.0, 1.0) : null;
 }
 
 /// A launcher notice; an error notice carries the code that selects its fix hint.

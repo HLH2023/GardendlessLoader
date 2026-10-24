@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app_controller.dart';
@@ -30,6 +32,8 @@ class SettingsPage extends StatelessWidget {
         _LoaderPanel(controller: controller, actions: actions),
         const SizedBox(height: 16),
         _LaunchPreferences(controller: controller),
+        const SizedBox(height: 16),
+        _SaveServerPanel(controller: controller),
         const SizedBox(height: 16),
         _AppearancePanel(controller: controller),
       ],
@@ -232,6 +236,180 @@ class _LaunchPreferences extends StatelessWidget {
             value: controller.watermarkEnabled,
             onChanged:
                 controller.initialized ? controller.setWatermarkEnabled : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Server address and device token: the two values cloud saves and the
+/// server-side resource download need. Both stay on the device.
+class _SaveServerPanel extends StatefulWidget {
+  const _SaveServerPanel({required this.controller});
+
+  final AppController controller;
+
+  @override
+  State<_SaveServerPanel> createState() => _SaveServerPanelState();
+}
+
+class _SaveServerPanelState extends State<_SaveServerPanel> {
+  late final TextEditingController _address =
+      TextEditingController(text: widget.controller.serverBaseUrl);
+  late final TextEditingController _token =
+      TextEditingController(text: widget.controller.deviceToken);
+  final FocusNode _addressFocus = FocusNode();
+  final FocusNode _tokenFocus = FocusNode();
+  bool _addressRejected = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _addressFocus.addListener(_onAddressFocus);
+    _tokenFocus.addListener(_onTokenFocus);
+  }
+
+  @override
+  void dispose() {
+    _addressFocus.removeListener(_onAddressFocus);
+    _tokenFocus.removeListener(_onTokenFocus);
+    _address.dispose();
+    _token.dispose();
+    _addressFocus.dispose();
+    _tokenFocus.dispose();
+    super.dispose();
+  }
+
+  void _onAddressFocus() {
+    if (!_addressFocus.hasFocus) {
+      unawaited(_saveAddress());
+    }
+  }
+
+  void _onTokenFocus() {
+    if (!_tokenFocus.hasFocus) {
+      unawaited(_saveToken());
+    }
+  }
+
+  Future<void> _saveAddress() async {
+    final accepted = await widget.controller.setServerBaseUrl(_address.text);
+    if (mounted) {
+      setState(() => _addressRejected = !accepted);
+    }
+  }
+
+  Future<void> _saveToken() async {
+    await widget.controller.setDeviceToken(_token.text);
+  }
+
+  InputDecoration _decoration(
+    String hint, {
+    String? error,
+    required GardenPalette palette,
+  }) {
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(color: palette.border),
+    );
+    return InputDecoration(
+      hintText: hint,
+      errorText: error,
+      isDense: true,
+      filled: true,
+      fillColor: palette.surfaceMuted,
+      hintStyle: TextStyle(color: palette.inkFaint, fontSize: 13),
+      errorStyle: TextStyle(color: palette.danger, fontSize: 12),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      border: border,
+      enabledBorder: border,
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: palette.accent),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.garden;
+    final strings = context.strings;
+    final labelStyle = TextStyle(
+      color: palette.ink,
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+    );
+    final issueUrl = widget.controller.deviceTokenUrl;
+    final hint = issueUrl.isEmpty
+        ? strings.saveServerAddressRequired
+        : strings.saveServerTokenIssue(issueUrl);
+    return SurfaceCard(
+      key: const ValueKey('save-server'),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PanelHeader(
+            title: strings.saveServer,
+            trailing: Text(
+              strings.saveServerAddressHint,
+              style: TextStyle(color: palette.inkFaint, fontSize: 12),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            strings.saveServerSubtitle,
+            style: TextStyle(
+              color: palette.inkMuted,
+              fontSize: 12.5,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(strings.saveServerAddress, style: labelStyle),
+          const SizedBox(height: 6),
+          TextField(
+            key: const ValueKey('save-server-address'),
+            controller: _address,
+            focusNode: _addressFocus,
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            textInputAction: TextInputAction.next,
+            style: TextStyle(color: palette.ink, fontSize: 13.5),
+            onSubmitted: (_) => unawaited(_saveAddress()),
+            decoration: _decoration(
+              strings.saveServerAddressHint,
+              palette: palette,
+              error: _addressRejected ? strings.saveServerInvalid : null,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(strings.deviceToken, style: labelStyle),
+          const SizedBox(height: 6),
+          TextField(
+            key: const ValueKey('save-server-token'),
+            controller: _token,
+            focusNode: _tokenFocus,
+            obscureText: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            textInputAction: TextInputAction.done,
+            style: GardenType.mono(13, color: palette.ink),
+            onSubmitted: (_) => unawaited(_saveToken()),
+            decoration: _decoration(
+              strings.deviceTokenHint,
+              palette: palette,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            hint,
+            style: TextStyle(
+              color: palette.inkMuted,
+              fontSize: 12,
+              height: 1.45,
+            ),
           ),
         ],
       ),

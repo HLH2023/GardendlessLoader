@@ -1,0 +1,547 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:crypto/crypto.dart';
+
+import '../constants.dart';
+
+/// A resource ZIP published by the save server's manifest.
+class RemoteResourceZip {
+  const RemoteResourceZip({
+    required this.name,
+    required this.version,
+    required this.size,
+    required this.sha256,
+    required this.urlApp,
+    required this.createdAt,
+    this.latest = false,
+  });
+
+  factory RemoteResourceZip.fromJson(Map<String, dynamic> json) {
+    final name = json['name'];
+    final urlApp = json['url_app'];
+    final sha = json['sha256'];
+    if (name is! String || name.isEmpty) {
+      throw const FormatException('resource zip has no name');
+    }
+    if (urlApp is! String || urlApp.isEmpty) {
+      throw const FormatException('resource zip has no url_app');
+    }
+    if (sha is! String || sha.length != 64) {
+      throw const FormatException('resource zip has no sha256 digest');
+    }
+    return RemoteResourceZip(
+      name: name,
+      version: json['version'] as String? ?? '',
+      size: (json['size'] as num?)?.toInt() ?? 0,
+      sha256: sha.toLowerCase(),
+      urlApp: urlApp,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(
+        ((json['created'] as num?)?.toInt() ?? 0) * 1000,
+        isUtc: true,
+      ),
+      latest: json['latest'] as bool? ?? false,
+    );
+  }
+
+  final String name;
+  final String version;
+  final int size;
+
+  /// Lowercase hex SHA-256 of the ZIP, checked after the download finishes.
+  final String sha256;
+
+  /// Path of the ZIP under the server base URL.
+  final String urlApp;
+  final DateTime createdAt;
+  final bool latest;
+}
+
+/// `GET {base}/_save/app/res/manifest.json` as the launcher needs it.
+class RemoteResourceManifest {
+  const RemoteResourceManifest({
+    required this.schema,
+    required this.gameVersion,
+    required this.imageDigest,
+    required this.zips,
+  });
+
+  factory RemoteResourceManifest.fromJson(Map<String, dynamic> json) {
+    final zips = json['zips'];
+    if (zips is! List) {
+      throw const FormatException('resource manifest has no zips list');
+    }
+    final game = json['game'];
+    return RemoteResourceManifest(
+      schema: (json['schema'] as num?)?.toInt() ?? 0,
+      gameVersion: game is Map ? game['version'] as String? : null,
+      imageDigest: game is Map ? game['image_digest'] as String? : null,
+      zips: zips
+          .whereType<Map<String, dynamic>>()
+          .map(RemoteResourceZip.fromJson)
+          .toList(growable: false),
+    );
+  }
+
+  final int schema;
+  final String? gameVersion;
+  final String? imageDigest;
+  final List<RemoteResourceZip> zips;
+
+  /// The ZIP flagged `latest`, else the last published one.
+  RemoteResourceZip? get latestZip {
+    if (zips.isEmpty) {
+      return null;
+    }
+    for (final zip in zips) {
+      if (zip.latest) return zip;
+    }
+    return zips.last;
+  }
+}
+
+/// Bytes of one download attempt, for the progress bar.
+class RemoteDownloadProgress {
+  const RemoteDownloadProgress({
+    required this.receivedBytes,
+    required this.totalBytes,
+    this.resumedBytes = 0,
+  });
+
+  final int receivedBytes;
+  final int totalBytes;
+
+  /// Bytes that were already on disk when this attempt resumed a ZIP.
+  final int resumedBytes;
+
+  double? get value =>
+      totalBytes > 0 ? (receivedBytes / totalBytes).clamp(0.0, 1.0) : null;
+}
+
+/// Cancels the download that was started with it: the next chunk check
+/// throws [RemoteResourceCancelled] and the partial file stays for a resume.
+class RemoteDownloadCancellation {
+  bool _cancelled = false;
+
+  bool get isCancelled => _cancelled;
+
+  void cancel() => _cancelled = true;
+
+  void throwIfCancelled() {
+    if (_cancelled) {
+      throw const RemoteResourceCancelled();
+    }
+  }
+}
+
+/// A save-server request failed; [code] is the log/error-catalog code.
+class RemoteResourceFailure implements Exception {
+  const RemoteResourceFailure(this.code, this.message);
+
+  final String code;
+  final String message;
+
+  @override
+  String toString() => '$code: $message';
+}
+
+class RemoteResourceCancelled implements Exception {
+  const RemoteResourceCancelled();
+
+  @override
+  String toString() => 'remote download cancelled';
+}
+
+/// Talks to the save server: the resource manifest, the document-start
+/// injection script, and resumable ZIP downloads.
+///
+/// Every request carries the user's device token as a bearer credential;
+/// nothing here retries or hides a failure — the caller decides what a
+/// failed request means.
+class RemoteResourceService {
+  HttpClient? _activeClient;
+
+  /// Breaks a download that is blocked on a socket read.
+  void abortActiveRequests() {
+    _activeClient?.close(force: true);
+    _activeClient = null;
+  }
+
+  Future<RemoteResourceManifest> fetchManifest({
+    required String token,
+    required String baseUrl,
+    Duration timeout = saveServerRequestTimeout,
+  }) async {
+    final body = await _getText(
+      _resolve(baseUrl, '/_save/app/res/manifest.json'),
+      token: token,
+      timeout: timeout,
+      maxBytes: saveServerManifestMaxBytes,
+      code: 'resource_manifest_unavailable',
+    );
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException catch (error) {
+      throw RemoteResourceFailure('resource_manifest_invalid', error.message);
+    }
+    if (decoded is! Map<String, dynamic>) {
+      throw const RemoteResourceFailure(
+        'resource_manifest_invalid',
+        'Manifest is not a JSON object',
+      );
+    }
+    try {
+      return RemoteResourceManifest.fromJson(decoded);
+    } on FormatException catch (error) {
+      throw RemoteResourceFailure('resource_manifest_invalid', error.message);
+    }
+  }
+
+  /// The shim the native host injects at document-start; it rewrites the
+  /// browser save-sync calls onto `{base}/_save/app` with our token.
+  Future<String> fetchAppSyncScript({
+    required String token,
+    required String baseUrl,
+    Duration timeout = saveServerRequestTimeout,
+  }) {
+    return _getText(
+      _resolve(baseUrl, '/_save/app-sync.js'),
+      token: token,
+      timeout: timeout,
+      maxBytes: saveServerScriptMaxBytes,
+      code: 'save_bridge_unavailable',
+      accept: 'text/javascript, */*',
+    );
+  }
+
+  /// Downloads the manifest's latest ZIP into [targetFile], resuming from the
+  /// bytes already on disk when the server honours `Range`.
+  ///
+  /// The file is deleted when its size or SHA-256 does not match the
+  /// manifest, so a resumed download can never be mistaken for a good one.
+  Future<File> downloadZip({
+    required RemoteResourceManifest manifest,
+    required String token,
+    required String baseUrl,
+    required File targetFile,
+    RemoteDownloadCancellation? cancellation,
+    void Function(RemoteDownloadProgress progress)? onProgress,
+  }) async {
+    final zip = manifest.latestZip;
+    if (zip == null) {
+      throw const RemoteResourceFailure(
+        'resource_manifest_empty',
+        '服务器没有可用资源包',
+      );
+    }
+    final uri = _resolve(baseUrl, zip.urlApp);
+    final etagFile = File('${targetFile.path}.etag');
+    await targetFile.parent.create(recursive: true);
+
+    var attempt = 0;
+    while (true) {
+      final resumeFrom = attempt == 0 ? await _fileLength(targetFile) : 0;
+      try {
+        await _downloadAttempt(
+          uri: uri,
+          token: token,
+          targetFile: targetFile,
+          etagFile: etagFile,
+          resumeFrom: resumeFrom,
+          expectedSize: zip.size,
+          cancellation: cancellation,
+          onProgress: onProgress,
+        );
+        break;
+      } on _RangeRejected {
+        // The server no longer has the bytes we hold: start over once.
+        await _deleteQuietly(targetFile);
+        await _deleteQuietly(etagFile);
+        if (attempt >= 1) {
+          throw const RemoteResourceFailure(
+            'resource_download_failed',
+            '服务器拒绝断点续传，重新下载仍失败',
+          );
+        }
+        attempt++;
+      }
+    }
+
+    final length = await targetFile.length();
+    if (zip.size > 0 && length != zip.size) {
+      await _deleteQuietly(targetFile);
+      await _deleteQuietly(etagFile);
+      throw RemoteResourceFailure(
+        'resource_size_mismatch',
+        '资源大小不符：$length / ${zip.size}',
+      );
+    }
+
+    final digest = await sha256.bind(targetFile.openRead()).first;
+    if (digest.toString() != zip.sha256) {
+      await _deleteQuietly(targetFile);
+      await _deleteQuietly(etagFile);
+      throw const RemoteResourceFailure(
+        'resource_checksum_mismatch',
+        '资源校验失败（SHA-256 不一致）',
+      );
+    }
+    await _deleteQuietly(etagFile);
+    return targetFile;
+  }
+
+  Future<void> _downloadAttempt({
+    required Uri uri,
+    required String token,
+    required File targetFile,
+    required File etagFile,
+    required int resumeFrom,
+    required int expectedSize,
+    RemoteDownloadCancellation? cancellation,
+    void Function(RemoteDownloadProgress progress)? onProgress,
+  }) async {
+    final client = HttpClient()
+      ..connectionTimeout = saveServerDownloadConnectTimeout;
+    _activeClient = client;
+    IOSink? sink;
+    try {
+      final request = await client.getUrl(uri);
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      request.headers.set(HttpHeaders.userAgentHeader, appDisplayName);
+      request.headers.set(HttpHeaders.acceptHeader, '*/*');
+      if (resumeFrom > 0) {
+        request.headers.set(HttpHeaders.rangeHeader, 'bytes=$resumeFrom-');
+        final etag = await _readEtag(etagFile);
+        if (etag != null) {
+          request.headers.set('If-Range', etag);
+        }
+      }
+      final response = await request.close();
+      cancellation?.throwIfCancelled();
+
+      final status = response.statusCode;
+      final bool append;
+      final int total;
+      if (status == HttpStatus.partialContent && resumeFrom > 0) {
+        final range = _parseContentRange(
+          response.headers.value(HttpHeaders.contentRangeHeader),
+        );
+        if (range == null || range.start != resumeFrom) {
+          await response.drain<void>();
+          throw const _RangeRejected();
+        }
+        append = true;
+        total =
+            range.total > 0 ? range.total : resumeFrom + response.contentLength;
+      } else if (status == HttpStatus.ok) {
+        append = false;
+        total =
+            response.contentLength > 0 ? response.contentLength : expectedSize;
+      } else if (status == HttpStatus.requestedRangeNotSatisfiable) {
+        await response.drain<void>();
+        throw const _RangeRejected();
+      } else {
+        await response.drain<void>();
+        throw _statusFailure(status, 'resource_download_failed');
+      }
+
+      final etag = response.headers.value(HttpHeaders.etagHeader);
+      // Stored before the body: an interrupted transfer still knows which
+      // version its bytes belong to, so If-Range can validate the resume.
+      if (etag != null && etag.isNotEmpty) {
+        await etagFile.writeAsString(etag, flush: true);
+      }
+      var received = append ? resumeFrom : 0;
+      sink = targetFile.openWrite(
+        mode: append ? FileMode.append : FileMode.write,
+      );
+      onProgress?.call(
+        RemoteDownloadProgress(
+          receivedBytes: received,
+          totalBytes: total,
+          resumedBytes: append ? resumeFrom : 0,
+        ),
+      );
+      await for (final chunk in response) {
+        if (cancellation?.isCancelled ?? false) {
+          throw const RemoteResourceCancelled();
+        }
+        sink.add(chunk);
+        received += chunk.length;
+        onProgress?.call(
+          RemoteDownloadProgress(receivedBytes: received, totalBytes: total),
+        );
+      }
+      await sink.flush();
+      await sink.close();
+      sink = null;
+    } on SocketException catch (error) {
+      if (cancellation?.isCancelled ?? false) {
+        throw const RemoteResourceCancelled();
+      }
+      throw RemoteResourceFailure(
+        'resource_download_failed',
+        _redact(error.message, uri),
+      );
+    } on HttpException catch (error) {
+      if (cancellation?.isCancelled ?? false) {
+        throw const RemoteResourceCancelled();
+      }
+      throw RemoteResourceFailure(
+        'resource_download_failed',
+        _redact(error.message, uri),
+      );
+    } finally {
+      try {
+        await sink?.flush();
+        await sink?.close();
+      } catch (_) {
+        // A cancelled download may already have lost its handle.
+      }
+      if (identical(_activeClient, client)) {
+        _activeClient = null;
+      }
+      client.close(force: true);
+    }
+  }
+
+  Future<String> _getText(
+    Uri uri, {
+    required String token,
+    required Duration timeout,
+    required int maxBytes,
+    required String code,
+    String accept = 'application/json, */*',
+  }) async {
+    final client = HttpClient()..connectionTimeout = timeout;
+    _activeClient = client;
+    try {
+      return await (() async {
+        final request = await client.getUrl(uri);
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        request.headers.set(HttpHeaders.userAgentHeader, appDisplayName);
+        request.headers.set(HttpHeaders.acceptHeader, accept);
+        final response = await request.close();
+        if (response.statusCode != HttpStatus.ok) {
+          await response.drain<void>();
+          throw _statusFailure(response.statusCode, code);
+        }
+        if (response.contentLength > maxBytes) {
+          await response.drain<void>();
+          throw RemoteResourceFailure(code, '服务器响应过大');
+        }
+        final bytes = await response.fold<List<int>>(<int>[], (buffer, chunk) {
+          if (buffer.length + chunk.length > maxBytes) {
+            throw RemoteResourceFailure(code, '服务器响应过大');
+          }
+          buffer.addAll(chunk);
+          return buffer;
+        });
+        return utf8.decode(bytes, allowMalformed: true);
+      })()
+          .timeout(timeout);
+    } on RemoteResourceFailure {
+      rethrow;
+    } on TimeoutException {
+      throw RemoteResourceFailure(code, '请求超时');
+    } on SocketException catch (error) {
+      throw RemoteResourceFailure(code, _redact(error.message, uri));
+    } on HttpException catch (error) {
+      throw RemoteResourceFailure(code, _redact(error.message, uri));
+    } on FormatException catch (error) {
+      throw RemoteResourceFailure(code, error.message);
+    } finally {
+      if (identical(_activeClient, client)) {
+        _activeClient = null;
+      }
+      client.close(force: true);
+    }
+  }
+
+  RemoteResourceFailure _statusFailure(int statusCode, String code) {
+    if (statusCode == HttpStatus.unauthorized ||
+        statusCode == HttpStatus.forbidden) {
+      return const RemoteResourceFailure(
+        'save_token_rejected',
+        '服务器拒绝了设备令牌（HTTP 401/403）',
+      );
+    }
+    if (statusCode == HttpStatus.notFound) {
+      return RemoteResourceFailure(code, '服务器没有这个资源（HTTP 404）');
+    }
+    return RemoteResourceFailure(code, 'HTTP $statusCode');
+  }
+
+  /// Joins [path] onto [baseUrl], keeping any path prefix the server is
+  /// mounted under.
+  Uri _resolve(String baseUrl, String path) {
+    final base = Uri.tryParse(baseUrl.trim());
+    if (base == null || base.host.isEmpty) {
+      throw const RemoteResourceFailure('save_server_invalid', '服务器地址无效');
+    }
+    if (base.scheme != 'https' && base.scheme != 'http') {
+      throw const RemoteResourceFailure('save_server_invalid', '服务器地址无效');
+    }
+    final prefix = base.path.replaceFirst(RegExp(r'/+$'), '');
+    return base.replace(path: '$prefix$path', query: '', fragment: '');
+  }
+
+  /// Connection errors quote the host they could not reach; the launcher
+  /// must never write the save server's address into a log or a message.
+  String _redact(String message, Uri uri) {
+    var redacted = message;
+    if (uri.authority.isNotEmpty) {
+      redacted = redacted.replaceAll(uri.authority, '***');
+    }
+    if (uri.host.isNotEmpty) {
+      redacted = redacted.replaceAll(uri.host, '***');
+    }
+    return redacted;
+  }
+
+  Future<int> _fileLength(File file) async {
+    try {
+      return await file.exists() ? await file.length() : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<String?> _readEtag(File etagFile) async {
+    try {
+      if (!await etagFile.exists()) return null;
+      final value = (await etagFile.readAsString()).trim();
+      return value.isEmpty ? null : value;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _deleteQuietly(File file) async {
+    try {
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {
+      // A file that cannot be removed is reported by the next verification.
+    }
+  }
+
+  ({int start, int end, int total})? _parseContentRange(String? header) {
+    if (header == null) return null;
+    final match = RegExp(r'bytes\s+(\d+)-(\d+)/(\d+|\*)').firstMatch(header);
+    if (match == null) return null;
+    return (
+      start: int.tryParse(match.group(1) ?? '') ?? -1,
+      end: int.tryParse(match.group(2) ?? '') ?? -1,
+      total: int.tryParse(match.group(3) ?? '') ?? 0,
+    );
+  }
+}
+
+/// The server answered a resumed request with a range we cannot append to.
+class _RangeRejected implements Exception {
+  const _RangeRejected();
+}

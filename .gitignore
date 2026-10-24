@@ -82,6 +82,12 @@ yarn-error.log*
 *.cer
 *.p8
 
+# Local build configuration: the save server address and device token stay
+# out of the repository. Only the compiled-in default from .env.local is used.
+/.env.local
+/tools/.env.local
+/tools/out/
+
 # Orphaned root Gradle wrapper (no root Gradle build)
 /gradle/
 /gradlew

@@ -38,12 +38,167 @@ class ResourcesPage extends StatelessWidget {
       right: [
         _GameVersionCard(controller: controller, actions: actions),
         const SizedBox(height: 16),
+        _ServerResourcesCard(controller: controller, actions: actions),
+        const SizedBox(height: 16),
         _ImportCard(
           controller: controller,
           actions: actions,
           detailsExpanded: detailsExpanded,
         ),
       ],
+    );
+  }
+}
+
+/// Downloads the save server's latest resource ZIP and imports it; the ZIP
+/// picker below keeps working unchanged.
+class _ServerResourcesCard extends StatelessWidget {
+  const _ServerResourcesCard({required this.controller, required this.actions});
+
+  final AppController controller;
+  final LauncherActions actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.garden;
+    final strings = context.strings;
+    final configured = controller.cloudServerConfigured;
+    final supported = controller.serverResourceDownloadSupported;
+    final status = controller.remoteDownload;
+    final manifest = controller.remoteManifest;
+    final failure = controller.remoteManifestFailure;
+    final zip = manifest?.latestZip;
+    final downloading = status.phase == RemoteDownloadPhase.downloading;
+    final scopeText = TextStyle(
+      color: palette.inkMuted,
+      fontSize: 13,
+      height: 1.5,
+    );
+    return SurfaceCard(
+      key: const ValueKey('server-resources'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PanelHeader(
+            title: strings.serverResources,
+            icon: Icons.cloud_download_outlined,
+            trailing: status.phase == RemoteDownloadPhase.completed
+                ? StatusLabel(
+                    label: strings.downloadCompleted,
+                    color: palette.accent,
+                  )
+                : null,
+          ),
+          const SizedBox(height: 8),
+          Text(strings.serverResourcesDescription, style: scopeText),
+          if (!configured) ...[
+            const SizedBox(height: 10),
+            Text(
+              strings.saveServerNotConfigured,
+              style: scopeText.copyWith(color: palette.warning),
+            ),
+          ] else if (!supported) ...[
+            const SizedBox(height: 10),
+            Text(
+              strings.serverDownloadUnsupported,
+              style: scopeText.copyWith(color: palette.warning),
+            ),
+          ],
+          if (zip != null) ...[
+            const SizedBox(height: 8),
+            InfoRow(
+              label: strings.gameVersion,
+              value: manifest?.gameVersion ?? zip.version,
+            ),
+            InfoRow(label: strings.size, value: formatBytes(zip.size)),
+            InfoRow(
+              label: strings.title,
+              value: zip.name,
+              mono: true,
+            ),
+          ],
+          if (failure != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              failure.message,
+              style: scopeText.copyWith(color: palette.danger, fontSize: 12.5),
+            ),
+          ],
+          if (downloading) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: status.value,
+                minHeight: 6,
+                backgroundColor: palette.surfaceMuted,
+                color: palette.accent,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              strings.downloadProgress(
+                formatBytes(status.receivedBytes),
+                formatBytes(status.totalBytes),
+              ),
+              style: scopeText.copyWith(fontSize: 12.5),
+            ),
+          ],
+          if (status.phase == RemoteDownloadPhase.importing) ...[
+            const SizedBox(height: 10),
+            Text(strings.importingDownloaded, style: scopeText),
+          ],
+          if (status.phase == RemoteDownloadPhase.failed) ...[
+            const SizedBox(height: 10),
+            Text(
+              '${strings.remoteDownloadFailed}: ${status.message ?? ''}',
+              style: scopeText.copyWith(color: palette.danger, fontSize: 12.5),
+            ),
+          ],
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              GardenButton(
+                key: const ValueKey('server-resources-check'),
+                label: strings.checkServerResources,
+                icon: Icons.refresh_rounded,
+                tone: GardenButtonTone.ghost,
+                compact: true,
+                busy: controller.remoteManifestLoading,
+                onPressed: configured && !status.active
+                    ? controller.refreshRemoteManifest
+                    : null,
+              ),
+              if (downloading)
+                GardenButton(
+                  key: const ValueKey('server-resources-cancel'),
+                  label: strings.cancelDownload,
+                  icon: Icons.close_rounded,
+                  tone: GardenButtonTone.danger,
+                  compact: true,
+                  onPressed: controller.cancelRemoteDownload,
+                )
+              else
+                GardenButton(
+                  key: const ValueKey('server-resources-download'),
+                  label: strings.downloadFromServer,
+                  icon: Icons.cloud_download_rounded,
+                  tone: GardenButtonTone.primary,
+                  compact: true,
+                  onPressed: configured &&
+                          supported &&
+                          !status.active &&
+                          !controller.busy &&
+                          !controller.isImporting
+                      ? () => actions.downloadServerResources()
+                      : null,
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
