@@ -544,6 +544,27 @@ class RemoteDownloadStatus {
       totalBytes > 0 ? (receivedBytes / totalBytes).clamp(0.0, 1.0) : null;
 }
 
+/// State of the in-app authentik sign-in, as the Settings page shows it.
+enum CloudLoginPhase { idle, opening, verifying, succeeded, failed }
+
+/// Where the embedded sign-in screen is, and why it last failed.
+class CloudLoginStatus {
+  const CloudLoginStatus({required this.phase, this.errorCode, this.message});
+
+  static const idle = CloudLoginStatus(phase: CloudLoginPhase.idle);
+
+  final CloudLoginPhase phase;
+
+  /// Error-catalog code when [phase] is failed.
+  final String? errorCode;
+
+  /// Detail shown under the sign-in button on failure.
+  final String? message;
+
+  bool get inProgress =>
+      phase == CloudLoginPhase.opening || phase == CloudLoginPhase.verifying;
+}
+
 /// A launcher notice; an error notice carries the code that selects its fix hint.
 class LauncherMessage {
   const LauncherMessage(this.text, [this.code]);

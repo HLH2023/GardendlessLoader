@@ -18,6 +18,7 @@ import 'services/about_content_service.dart';
 import 'services/announcement_service.dart';
 import 'services/app_paths_service.dart';
 import 'services/app_settings_store.dart';
+import 'services/cloud_login_service.dart';
 import 'services/diagnostics_service.dart';
 import 'services/garden_journal.dart';
 import 'services/game_update_check_service.dart';
@@ -56,8 +57,10 @@ class AppController extends ChangeNotifier {
   final ResourcePickerService _resourcePickerService = ResourcePickerService();
   final ShortcutService _shortcutService = ShortcutService();
   final RemoteResourceService _remoteResourceService = RemoteResourceService();
+  final CloudLoginService _cloudLoginService = const CloudLoginService();
   late final ImportService _importService;
   RemoteDownloadStatus _remoteDownload = RemoteDownloadStatus.idle;
+  CloudLoginStatus _cloudLogin = CloudLoginStatus.idle;
   RemoteResourceManifest? _remoteManifest;
   ({String? code, String message})? _remoteManifestFailure;
   bool _remoteManifestLoading = false;
@@ -94,6 +97,8 @@ class AppController extends ChangeNotifier {
   String? _deferredUpdateTagName;
   String? _deferredGameUpdateTagName;
   String _currentAppVersion = appVersion;
+  String _installedVersionName = appVersion;
+  String _installedBuildNumber = '';
   String? _currentGameVersion;
   String? _latestAppVersion;
   String? _latestGameVersion;
@@ -153,6 +158,11 @@ class AppController extends ChangeNotifier {
   UpdateInfo? get availableUpdate => _availableUpdate;
   GameUpdateInfo? get availableGameUpdate => _availableGameUpdate;
   String get currentAppVersion => _currentAppVersion;
+
+  /// Installed versionName exactly as packaged (`0.9.0-hlh.1`), for the
+  /// Settings page so the user can tell which personal build is installed.
+  String get installedVersionName => _installedVersionName;
+  String get installedBuildNumber => _installedBuildNumber;
   String? get latestAppVersion => _latestAppVersion;
   String? get currentGameVersion => _currentGameVersion;
   String? get latestGameVersion => _latestGameVersion;
@@ -186,8 +196,29 @@ class AppController extends ChangeNotifier {
   /// Page a user opens in a browser to issue a device token.
   String get deviceTokenUrl {
     final base = _appSettings.effectiveServerBaseUrl;
-    return base.isEmpty ? '' : '$base/_save/app.html';
+    return base.isEmpty ? '' : '$base$saveLoginPagePath';
   }
+
+  /// The authentik-protected page the in-app sign-in screen loads; it hands the
+  /// token to the native bridge instead of asking the user to copy it.
+  String get saveLoginUrl {
+    final base = _appSettings.effectiveServerBaseUrl;
+    return base.isEmpty ? '' : '$base$saveLoginPagePath?$saveLoginBridgeQuery';
+  }
+
+  CloudLoginStatus get cloudLogin => _cloudLogin;
+  bool get cloudLoginInProgress => _cloudLogin.inProgress;
+
+  /// Only the Android host embeds the sign-in screen.
+  bool get cloudLoginSupported => Platform.isAndroid;
+
+  /// Account name the server reported for the stored token, when verified.
+  String get cloudAccount => _appSettings.deviceAccount;
+  bool get cloudAccountKnown => _appSettings.deviceAccount.isNotEmpty;
+
+  /// Whether a server address is known, with or without a token yet.
+  bool get cloudServerAddressConfigured =>
+      _appSettings.effectiveServerBaseUrl.isNotEmpty;
 
   RemoteDownloadStatus get remoteDownload => _remoteDownload;
   RemoteResourceManifest? get remoteManifest => _remoteManifest;
@@ -540,6 +571,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _loadCurrentAppVersion() async {
+    final build = await _updateCheckService.loadInstalledBuild();
+    _installedVersionName = build.versionName;
+    _installedBuildNumber = build.buildNumber;
     _currentAppVersion = await _updateCheckService.loadCurrentVersion();
   }
 
@@ -1239,8 +1273,195 @@ class AppController extends ChangeNotifier {
     return true;
   }
 
+  /// Saves a token the user pasted by hand. The account name is dropped
+  /// because only the server can say whom a token belongs to.
   Future<void> setDeviceToken(String value) {
-    return _updateAppSettings(_appSettings.copyWith(deviceToken: value.trim()));
+    final token = value.trim();
+    return _updateAppSettings(
+      _appSettings.copyWith(
+        deviceToken: token,
+        deviceAccount:
+            token == _appSettings.deviceToken ? _appSettings.deviceAccount : '',
+      ),
+    );
+  }
+
+  /// Signs in on the save server's own authentik page inside a native WebView.
+  ///
+  /// The page posts `{token, id, base}` to `window.GardendlessBridge`; this
+  /// method then proves the token with `/_save/app/whoami` before persisting
+  /// it, so a half-finished authentik flow never looks like a working login.
+  Future<void> loginWithAuthentik() async {
+    if (_cloudLogin.inProgress) return;
+    final base = _appSettings.effectiveServerBaseUrl;
+    if (base.isEmpty) {
+      _cloudLogin = CloudLoginStatus(
+        phase: CloudLoginPhase.failed,
+        errorCode: 'save_server_invalid',
+        message: AppStrings.current.saveServerAddressRequired,
+      );
+      notifyListeners();
+      return;
+    }
+    final operationId = _newOperationId('cloud-login');
+    _cloudLogin = const CloudLoginStatus(phase: CloudLoginPhase.opening);
+    notifyListeners();
+    _appLogger.emit(
+      level: LogLevel.info,
+      category: 'cloud.login',
+      event: 'cloud_login_started',
+      outcome: LogOutcome.started,
+      operationId: operationId,
+      context: <String, Object?>{'server': maskedServerBase(base)},
+    );
+    try {
+      final credentials = await _cloudLoginService.loginWithAuthentik(
+        baseUrl: base,
+        loginUrl: saveLoginUrl,
+        title: AppStrings.current.cloudLoginTitle,
+      );
+      if (credentials == null) {
+        _cloudLogin = CloudLoginStatus.idle;
+        notifyListeners();
+        _appLogger.emit(
+          level: LogLevel.info,
+          category: 'cloud.login',
+          event: 'cloud_login_finished',
+          outcome: LogOutcome.cancelled,
+          operationId: operationId,
+          context: <String, Object?>{'stage': 'sign_in_page'},
+        );
+        return;
+      }
+      final confirmedBase = normalizeServerBaseUrl(
+            credentials.baseUrl.isEmpty ? base : credentials.baseUrl,
+          ) ??
+          base;
+      _cloudLogin = const CloudLoginStatus(phase: CloudLoginPhase.verifying);
+      notifyListeners();
+      final identity = await _remoteResourceService.fetchWhoami(
+        token: credentials.token,
+        baseUrl: confirmedBase,
+      );
+      await _updateAppSettings(
+        _appSettings.copyWith(
+          serverBaseUrl: confirmedBase,
+          deviceToken: credentials.token,
+          deviceAccount: identity.user,
+        ),
+      );
+      // The resource list is served with the new token; refresh it in place.
+      _remoteManifest = null;
+      _remoteManifestFailure = null;
+      _cloudLogin = const CloudLoginStatus(phase: CloudLoginPhase.succeeded);
+      notifyListeners();
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'cloud.login',
+        event: 'cloud_login_finished',
+        outcome: LogOutcome.succeeded,
+        operationId: operationId,
+        context: <String, Object?>{
+          'stage': 'verified',
+          'server': maskedServerBase(confirmedBase),
+          'accountKnown': identity.user.isNotEmpty,
+        },
+      );
+    } on CloudLoginFailure catch (failure) {
+      _failCloudLogin(failure.code, failure.message);
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'cloud.login',
+        event: 'cloud_login_finished',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        message: failure.message,
+        operationId: operationId,
+        context: <String, Object?>{'stage': 'sign_in_page'},
+      );
+    } on RemoteResourceFailure catch (failure) {
+      _failCloudLogin(failure.code, failure.message);
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'cloud.login',
+        event: 'cloud_login_finished',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        message: failure.message,
+        operationId: operationId,
+        context: <String, Object?>{'stage': 'verification'},
+      );
+    } catch (error, stackTrace) {
+      _failCloudLogin('login_failed', '$error');
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'cloud.login',
+        event: 'cloud_login_finished',
+        outcome: LogOutcome.failed,
+        code: 'login_failed',
+        error: error,
+        stackTrace: stackTrace,
+        operationId: operationId,
+        context: <String, Object?>{'stage': 'sign_in_page'},
+      );
+    }
+  }
+
+  /// Re-checks an already stored token with `whoami`, e.g. after switching
+  /// servers or when the account name was never shown.
+  Future<void> verifyCloudIdentity() async {
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty || _cloudLogin.inProgress) return;
+    _cloudLogin = const CloudLoginStatus(phase: CloudLoginPhase.verifying);
+    notifyListeners();
+    try {
+      final identity = await _remoteResourceService.fetchWhoami(
+        token: token,
+        baseUrl: base,
+      );
+      if (token != _appSettings.deviceToken.trim()) return;
+      await _updateAppSettings(
+        _appSettings.copyWith(deviceAccount: identity.user),
+      );
+      _cloudLogin = const CloudLoginStatus(phase: CloudLoginPhase.succeeded);
+    } on RemoteResourceFailure catch (failure) {
+      _cloudLogin = CloudLoginStatus(
+        phase: CloudLoginPhase.failed,
+        errorCode: failure.code,
+        message: failure.message,
+      );
+    } catch (error, stackTrace) {
+      _cloudLogin = const CloudLoginStatus(
+        phase: CloudLoginPhase.failed,
+        errorCode: 'login_failed',
+        message: '身份校验失败',
+      );
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'cloud.login',
+        event: 'cloud_login_finished',
+        outcome: LogOutcome.failed,
+        code: 'login_failed',
+        error: error,
+        stackTrace: stackTrace,
+        context: <String, Object?>{'stage': 'verification'},
+      );
+    } finally {
+      if (_cloudLogin.inProgress) {
+        _cloudLogin = CloudLoginStatus.idle;
+      }
+      notifyListeners();
+    }
+  }
+
+  void _failCloudLogin(String code, String message) {
+    _cloudLogin = CloudLoginStatus(
+      phase: CloudLoginPhase.failed,
+      errorCode: code,
+      message: message,
+    );
+    notifyListeners();
   }
 
   /// Reads `{base}/_save/app/res/manifest.json` so the page can show which

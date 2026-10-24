@@ -76,7 +76,7 @@ class _LoaderPanel extends StatelessWidget {
             metrics: [
               Metric(
                 label: strings.currentVersion,
-                value: 'v${controller.currentAppVersion}',
+                value: 'v${controller.installedVersionName}',
               ),
               Metric(
                 label: strings.latestVersion,
@@ -85,6 +85,14 @@ class _LoaderPanel extends StatelessWidget {
                     : 'v${controller.latestAppVersion}',
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          InfoRow(
+            label: strings.buildNumber,
+            value: controller.installedBuildNumber.isEmpty
+                ? '--'
+                : controller.installedBuildNumber,
+            mono: true,
           ),
           const SizedBox(height: 14),
           if (update == null)
@@ -243,8 +251,8 @@ class _LaunchPreferences extends StatelessWidget {
   }
 }
 
-/// Server address and device token: the two values cloud saves and the
-/// server-side resource download need. Both stay on the device.
+/// The sign-in card: authentik first, with manual token entry tucked under
+/// "Advanced" for the rare case the embedded page cannot be used.
 class _SaveServerPanel extends StatefulWidget {
   const _SaveServerPanel({required this.controller});
 
@@ -262,6 +270,14 @@ class _SaveServerPanelState extends State<_SaveServerPanel> {
   final FocusNode _addressFocus = FocusNode();
   final FocusNode _tokenFocus = FocusNode();
   bool _addressRejected = false;
+
+  /// A field the user has edited but not saved yet; a rebuild must not
+  /// overwrite that draft with the last persisted value.
+  bool _addressDirty = false;
+  bool _tokenDirty = false;
+
+  /// Manual entry is a fallback, so it starts folded.
+  bool _advancedOpen = false;
 
   @override
   void initState() {
@@ -295,6 +311,7 @@ class _SaveServerPanelState extends State<_SaveServerPanel> {
 
   Future<void> _saveAddress() async {
     final accepted = await widget.controller.setServerBaseUrl(_address.text);
+    if (accepted) _addressDirty = false;
     if (mounted) {
       setState(() => _addressRejected = !accepted);
     }
@@ -302,6 +319,25 @@ class _SaveServerPanelState extends State<_SaveServerPanel> {
 
   Future<void> _saveToken() async {
     await widget.controller.setDeviceToken(_token.text);
+    _tokenDirty = false;
+  }
+
+  /// Signing in rewrites both fields; keep the folded editors in step once the
+  /// frame that notified us is done.
+  void _syncEditor(
+    TextEditingController controller,
+    FocusNode focus,
+    String value,
+    bool dirty,
+  ) {
+    if (focus.hasFocus || dirty || controller.text == value) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || focus.hasFocus || controller.text == value) return;
+      controller.text = value;
+      if (controller == _address) {
+        setState(() => _addressRejected = false);
+      }
+    });
   }
 
   InputDecoration _decoration(
@@ -331,19 +367,61 @@ class _SaveServerPanelState extends State<_SaveServerPanel> {
     );
   }
 
+  /// Only the host is shown; the full address may carry a private path.
+  String _serverLabel() {
+    final base = widget.controller.serverBaseUrl.trim();
+    if (base.isEmpty) return '—';
+    final uri = Uri.tryParse(base);
+    if (uri == null || uri.host.isEmpty) return base;
+    return uri.host;
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.garden;
     final strings = context.strings;
+    final controller = widget.controller;
+    final status = controller.cloudLogin;
+    final baseReady = controller.cloudServerAddressConfigured;
+    final configured = controller.cloudServerConfigured;
     final labelStyle = TextStyle(
       color: palette.ink,
       fontSize: 13,
       fontWeight: FontWeight.w600,
     );
-    final issueUrl = widget.controller.deviceTokenUrl;
-    final hint = issueUrl.isEmpty
+    _syncEditor(
+      _address,
+      _addressFocus,
+      controller.serverBaseUrl,
+      _addressDirty,
+    );
+    _syncEditor(_token, _tokenFocus, controller.deviceToken, _tokenDirty);
+
+    final statusText = switch (status.phase) {
+      CloudLoginPhase.opening => strings.cloudLoginOpening,
+      CloudLoginPhase.verifying => strings.cloudLoginVerifying,
+      CloudLoginPhase.succeeded => controller.cloudAccountKnown
+          ? strings.cloudLoginSucceededAs(controller.cloudAccount)
+          : strings.cloudLoginSucceeded,
+      CloudLoginPhase.failed =>
+        '${strings.cloudLoginFailed}：${status.message ?? ''}',
+      CloudLoginPhase.idle => !configured
+          ? null
+          : controller.cloudAccountKnown
+              ? strings.cloudLoginSucceededAs(controller.cloudAccount)
+              : strings.cloudLoginStoredToken,
+    };
+    final statusColor = switch (status.phase) {
+      CloudLoginPhase.failed => palette.danger,
+      CloudLoginPhase.succeeded => palette.accent,
+      CloudLoginPhase.opening || CloudLoginPhase.verifying => palette.inkMuted,
+      CloudLoginPhase.idle => configured ? palette.accent : palette.inkMuted,
+    };
+    final issueUrl = controller.deviceTokenUrl;
+    final manualHint = issueUrl.isEmpty
         ? strings.saveServerAddressRequired
         : strings.saveServerTokenIssue(issueUrl);
+
     return SurfaceCard(
       key: const ValueKey('save-server'),
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
@@ -352,9 +430,11 @@ class _SaveServerPanelState extends State<_SaveServerPanel> {
         children: [
           PanelHeader(
             title: strings.saveServer,
-            trailing: Text(
-              strings.saveServerAddressHint,
-              style: TextStyle(color: palette.inkFaint, fontSize: 12),
+            trailing: StatusLabel(
+              label: configured
+                  ? strings.cloudLoginSucceeded
+                  : strings.cloudLoginSignedOut,
+              color: configured ? palette.accent : palette.inkFaint,
             ),
           ),
           const SizedBox(height: 4),
@@ -366,50 +446,173 @@ class _SaveServerPanelState extends State<_SaveServerPanel> {
               height: 1.45,
             ),
           ),
-          const SizedBox(height: 14),
-          Text(strings.saveServerAddress, style: labelStyle),
-          const SizedBox(height: 6),
-          TextField(
-            key: const ValueKey('save-server-address'),
-            controller: _address,
-            focusNode: _addressFocus,
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            textInputAction: TextInputAction.next,
-            style: TextStyle(color: palette.ink, fontSize: 13.5),
-            onSubmitted: (_) => unawaited(_saveAddress()),
-            decoration: _decoration(
-              strings.saveServerAddressHint,
-              palette: palette,
-              error: _addressRejected ? strings.saveServerInvalid : null,
-            ),
+          const SizedBox(height: 12),
+          InfoRow(
+            label: strings.saveServerAddress,
+            value: _serverLabel(),
+            mono: true,
           ),
-          const SizedBox(height: 14),
-          Text(strings.deviceToken, style: labelStyle),
-          const SizedBox(height: 6),
-          TextField(
-            key: const ValueKey('save-server-token'),
-            controller: _token,
-            focusNode: _tokenFocus,
-            obscureText: true,
-            autocorrect: false,
-            enableSuggestions: false,
-            textInputAction: TextInputAction.done,
-            style: GardenType.mono(13, color: palette.ink),
-            onSubmitted: (_) => unawaited(_saveToken()),
-            decoration: _decoration(
-              strings.deviceTokenHint,
-              palette: palette,
+          if (statusText != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (status.inProgress) ...[
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: palette.accent,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 12.5,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ],
             ),
+          ],
+          const SizedBox(height: 12),
+          GardenButton(
+            key: const ValueKey('cloud-login-button'),
+            label: configured
+                ? strings.cloudLoginSignInAgain
+                : strings.cloudLoginAction,
+            icon: Icons.login_rounded,
+            tone: GardenButtonTone.primary,
+            busy: controller.cloudLoginInProgress,
+            onPressed: controller.cloudLoginSupported && baseReady
+                ? () => unawaited(controller.loginWithAuthentik())
+                : null,
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
-            hint,
+            baseReady
+                ? strings.cloudLoginAutoSaveHint
+                : strings.cloudLoginServerMissing,
             style: TextStyle(
-              color: palette.inkMuted,
+              color: baseReady ? palette.inkMuted : palette.warning,
               fontSize: 12,
               height: 1.45,
             ),
+          ),
+          if (configured &&
+              !controller.cloudAccountKnown &&
+              !controller.cloudLoginInProgress) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: GardenButton(
+                key: const ValueKey('cloud-login-verify'),
+                label: strings.cloudLoginVerifyIdentity,
+                icon: Icons.verified_outlined,
+                tone: GardenButtonTone.ghost,
+                compact: true,
+                onPressed: () => unawaited(controller.verifyCloudIdentity()),
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const ValueKey('cloud-login-advanced'),
+              onPressed: () => setState(() => _advancedOpen = !_advancedOpen),
+              icon: Icon(
+                _advancedOpen
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 18,
+              ),
+              label: Text(strings.cloudLoginManualSection),
+              style: TextButton.styleFrom(
+                foregroundColor: palette.inkMuted,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                minimumSize: const Size(0, 36),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                textStyle: const TextStyle(fontSize: 12.5),
+              ),
+            ),
+          ),
+          AnimatedSize(
+            duration: GardenMotion.quick,
+            alignment: Alignment.topCenter,
+            child: !_advancedOpen
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          strings.cloudLoginManualHint,
+                          style: TextStyle(
+                            color: palette.inkMuted,
+                            fontSize: 12,
+                            height: 1.45,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(strings.saveServerAddress, style: labelStyle),
+                        const SizedBox(height: 6),
+                        TextField(
+                          key: const ValueKey('save-server-address'),
+                          controller: _address,
+                          focusNode: _addressFocus,
+                          keyboardType: TextInputType.url,
+                          autocorrect: false,
+                          textInputAction: TextInputAction.next,
+                          style: TextStyle(color: palette.ink, fontSize: 13.5),
+                          onChanged: (_) => _addressDirty = true,
+                          onSubmitted: (_) => unawaited(_saveAddress()),
+                          decoration: _decoration(
+                            strings.saveServerAddressHint,
+                            palette: palette,
+                            error: _addressRejected
+                                ? strings.saveServerInvalid
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(strings.deviceToken, style: labelStyle),
+                        const SizedBox(height: 6),
+                        TextField(
+                          key: const ValueKey('save-server-token'),
+                          controller: _token,
+                          focusNode: _tokenFocus,
+                          obscureText: true,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          textInputAction: TextInputAction.done,
+                          style: GardenType.mono(13, color: palette.ink),
+                          onChanged: (_) => _tokenDirty = true,
+                          onSubmitted: (_) => unawaited(_saveToken()),
+                          decoration: _decoration(
+                            strings.deviceTokenHint,
+                            palette: palette,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          manualHint,
+                          style: TextStyle(
+                            color: palette.inkMuted,
+                            fontSize: 12,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
           ),
         ],
       ),
