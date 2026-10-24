@@ -10,6 +10,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
 import io.github.dey410.gardendlessloader.game.GameActivity
+import io.github.dey410.gardendlessloader.login.LoginActivity
+import io.github.dey410.gardendlessloader.login.LoginTokenPayload
 import io.github.dey410.gardendlessloader.logging.AppLogStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -35,6 +37,9 @@ class MainActivity : FlutterActivity() {
     private var shortcutChannel: MethodChannel? = null
     /** The home-screen shortcut that opened the launcher, until Flutter takes it. */
     private var pendingShortcut: String? = null
+
+    /** The Flutter call waiting on the embedded sign-in screen, if any. */
+    private var pendingLoginResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -84,6 +89,45 @@ class MainActivity : FlutterActivity() {
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
                 .onSuccess { result.success(null) }
                 .onFailure { result.error("external_open_failed", it.message, null) }
+        }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "io.github.dey410.gardendlessloader/cloud_login",
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "authentikLogin") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            if (pendingLoginResult != null) {
+                result.error("login_busy", "已有一个登录窗口在进行中", null)
+                return@setMethodCallHandler
+            }
+            val baseUrl = call.argument<String>("baseUrl")?.trim().orEmpty()
+            val pageUrl = call.argument<String>("loginUrl")?.trim().orEmpty()
+            if (!isLoginTargetAllowed(baseUrl, pageUrl)) {
+                result.error("login_invalid_base", "登录地址无效", null)
+                return@setMethodCallHandler
+            }
+            pendingLoginResult = result
+            try {
+                startActivityForResult(
+                    Intent(this, LoginActivity::class.java)
+                        .putExtra(LoginActivity.EXTRA_BASE_URL, baseUrl)
+                        .putExtra(LoginActivity.EXTRA_PAGE_URL, pageUrl)
+                        .putExtra(
+                            LoginActivity.EXTRA_TITLE,
+                            call.argument<String>("title").orEmpty(),
+                        ),
+                    cloudLoginRequestCode,
+                )
+            } catch (error: Exception) {
+                pendingLoginResult = null
+                result.error(
+                    "login_activity_unavailable",
+                    error.message ?: error.toString(),
+                    null,
+                )
+            }
         }
         val importChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -220,6 +264,10 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        pendingLoginResult?.let { result ->
+            pendingLoginResult = null
+            result.error("login_cancelled", "登录窗口已关闭", null)
+        }
         if (isFinishing && !transferringToGameHost) {
             AppLogStore.endSession()
         }
@@ -270,7 +318,60 @@ class MainActivity : FlutterActivity() {
         result.error("zip_picker_failed", error.message ?: error.toString(), null)
     }
 
+    /**
+     * The sign-in page hands over `{token, id, base}` through
+     * `window.GardendlessBridge`; a back press or a page failure answers the
+     * Flutter call with null or an error, never a token.
+     */
+    private fun finishCloudLogin(resultCode: Int, data: Intent?) {
+        val result = pendingLoginResult
+        pendingLoginResult = null
+        if (result == null) return
+        if (resultCode != RESULT_OK || data == null) {
+            val code = data?.getStringExtra(LoginActivity.EXTRA_ERROR_CODE)
+            if (code != null) {
+                result.error(
+                    code,
+                    data.getStringExtra(LoginActivity.EXTRA_ERROR_MESSAGE)
+                        ?: "登录未完成",
+                    null,
+                )
+            } else {
+                result.success(null)
+            }
+            return
+        }
+        val token = data.getStringExtra(LoginActivity.EXTRA_TOKEN)?.trim().orEmpty()
+        if (token.isEmpty()) {
+            result.error("login_failed", "登录没有返回设备令牌", null)
+            return
+        }
+        result.success(
+            mapOf(
+                "token" to token,
+                "id" to data.getStringExtra(LoginActivity.EXTRA_ACCOUNT_ID).orEmpty(),
+                "base" to data.getStringExtra(LoginActivity.EXTRA_BASE_URL).orEmpty(),
+            ),
+        )
+    }
+
+    /** A sign-in may only start on the same allowed origin Flutter named. */
+    private fun isLoginTargetAllowed(baseUrl: String, pageUrl: String): Boolean {
+        val base = runCatching { Uri.parse(baseUrl) }.getOrNull() ?: return false
+        val page = runCatching { Uri.parse(pageUrl) }.getOrNull() ?: return false
+        val host = base.host?.takeIf { it.isNotEmpty() } ?: return false
+        if (page.host.isNullOrEmpty() || !page.host.equals(host, ignoreCase = true)) {
+            return false
+        }
+        return LoginTokenPayload.isAllowedScheme(base.scheme, host) &&
+            LoginTokenPayload.isAllowedScheme(page.scheme, host)
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == cloudLoginRequestCode) {
+            finishCloudLogin(resultCode, data)
+            return
+        }
         if (requestCode != pickZipRequestCode) {
             super.onActivityResult(requestCode, resultCode, data)
             return
@@ -569,6 +670,7 @@ class MainActivity : FlutterActivity() {
         const val ACTION_SHORTCUT = "io.github.dey410.gardendlessloader.SHORTCUT"
         const val EXTRA_SHORTCUT = "shortcut"
         private const val pickZipRequestCode = 26410
+        private const val cloudLoginRequestCode = 26411
         private const val zipCopyBufferSize = 64 * 1024
         private const val progressReportIntervalMs = 100L
     }

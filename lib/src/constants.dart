@@ -23,6 +23,9 @@ const kDefaultServerBase = String.fromEnvironment(
   defaultValue: '',
 );
 const saveServerRequestTimeout = Duration(seconds: 20); // 服务器请求（清单、注入脚本）超时时间
+const saveLoginPagePath = '/_save/app.html'; // 令牌签发页；浏览器打开时是手动复制模式
+const saveLoginBridgeQuery = 'bridge=1'; // 应用内登录：页面通过 GardendlessBridge 回传令牌
+const saveWhoamiPath = '/_save/app/whoami'; // 校验设备令牌，返回 {"user": "..."}
 const saveServerDownloadConnectTimeout = Duration(seconds: 20); // 资源下载建立连接的超时时间
 const saveServerManifestMaxBytes = 512 * 1024; // 资源清单最大响应体，512KB
 const saveServerScriptMaxBytes = 2 * 1024 * 1024; // 注入脚本最大响应体，2MB

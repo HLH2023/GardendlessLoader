@@ -4,6 +4,13 @@
         <item name="android:windowBackground">@drawable/launch_background</item>
     </style>
     <style name="NormalTheme" parent="@android:style/Theme.Material.Light.NoActionBar" />
+    <!-- The embedded sign-in page is a plain white form; a light theme keeps
+         authentik's inputs readable regardless of the system dark mode. -->
+    <style name="LoginTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:colorAccent">#2F6B3A</item>
+        <item name="android:statusBarColor">#F4F1E8</item>
+    </style>
     <style name="GameHostTheme" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>

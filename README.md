@@ -244,6 +244,12 @@ flutter build apk --release
 
 产物位于 `build/app/outputs/flutter-apk/app-release.apk`。
 
+个人构建（本 Fork）使用带个人标识的版本号 `X.Y.Z-hlh.N`，`versionCode` 为
+`major*1000000 + minor*10000 + patch*100 + N`（例如 `0.9.0-hlh.1` → `90001`）。
+发布个人构建前先运行 `tools/bump-version.sh` 递增 `N`，再用 `tools/build-apk.sh --release`
+打包；脚本会把 versionName/versionCode 同时写入 APK 并打印出来。设置页的「构建号」
+显示的就是装上的这个值。
+
 **iOS**
 
 ```bash

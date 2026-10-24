@@ -104,6 +104,18 @@ const defaultLogEventSchemas = <String, LogEventSchema>{
       'page': LogContextValueType.path,
     },
   ),
+  'cloud_login_started': LogEventSchema(
+    contextFields: <String, LogContextValueType>{
+      'server': LogContextValueType.url,
+    },
+  ),
+  'cloud_login_finished': LogEventSchema(
+    contextFields: <String, LogContextValueType>{
+      'stage': LogContextValueType.text,
+      'server': LogContextValueType.url,
+      'accountKnown': LogContextValueType.boolean,
+    },
+  ),
 };
 
 const userErrorCatalog = <String, UserLogError>{
@@ -936,6 +948,97 @@ const userErrorCatalog = <String, UserLogError>{
     action: LocalizedText(
       '请重启加载器后再开始游戏。',
       'Restart the loader, then start the game.',
+    ),
+    recoverable: true,
+  ),
+  'save_server_invalid': UserLogError(
+    category: 'cloud.login',
+    level: LogLevel.error,
+    title: LocalizedText(
+      '服务器地址无效',
+      'Invalid server address',
+    ),
+    action: LocalizedText(
+      '请填写以 https:// 开头的完整服务器地址后再登录。',
+      'Enter the full https:// server address, then sign in again.',
+    ),
+    recoverable: true,
+  ),
+  'login_invalid_base': UserLogError(
+    category: 'cloud.login',
+    level: LogLevel.error,
+    title: LocalizedText(
+      '登录地址不可用',
+      'Sign-in address rejected',
+    ),
+    action: LocalizedText(
+      '请检查服务器地址后重试；加载器只允许在服务器自己的域名下登录。',
+      'Check the server address and retry; the loader only signs in on the server’s own host.',
+    ),
+    recoverable: true,
+  ),
+  'login_unsupported': UserLogError(
+    category: 'cloud.login',
+    level: LogLevel.error,
+    title: LocalizedText(
+      '此版本无法应用内登录',
+      'In-app sign-in unavailable',
+    ),
+    action: LocalizedText(
+      '请在设置页展开「高级」，手动填写设备令牌。',
+      'Open “Advanced” in Settings and enter a device token manually.',
+    ),
+    recoverable: true,
+  ),
+  'login_activity_unavailable': UserLogError(
+    category: 'cloud.login',
+    level: LogLevel.error,
+    title: LocalizedText(
+      '登录窗口打不开',
+      'Could not open the sign-in screen',
+    ),
+    action: LocalizedText(
+      '请重启加载器后重试。',
+      'Restart the loader and try again.',
+    ),
+    recoverable: true,
+  ),
+  'login_busy': UserLogError(
+    category: 'cloud.login',
+    level: LogLevel.warn,
+    title: LocalizedText(
+      '登录窗口已打开',
+      'The sign-in screen is already open',
+    ),
+    action: LocalizedText(
+      '请先在登录窗口完成操作。',
+      'Finish the sign-in that is already open first.',
+    ),
+    recoverable: true,
+  ),
+  'login_failed': UserLogError(
+    category: 'cloud.login',
+    level: LogLevel.error,
+    title: LocalizedText(
+      '登录失败',
+      'Sign-in failed',
+    ),
+    action: LocalizedText(
+      '请重试；若仍失败，到设置页展开「高级」手动填写令牌。',
+      'Try again; if it still fails, open “Advanced” in Settings and enter a token manually.',
+    ),
+    recoverable: true,
+  ),
+  'save_login_unverified': UserLogError(
+    category: 'cloud.login',
+    level: LogLevel.error,
+    title: LocalizedText(
+      '设备令牌未通过校验',
+      'The device token was rejected',
+    ),
+    action: LocalizedText(
+      '服务器未确认该令牌，请重新登录。',
+      'The server did not confirm the token; sign in again.',
     ),
     recoverable: true,
   ),

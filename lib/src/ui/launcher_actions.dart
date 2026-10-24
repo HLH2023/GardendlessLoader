@@ -42,6 +42,7 @@ class LauncherActions {
     required this.copyLogEvent,
     required this.deleteLogHistory,
     required this.toggleImportDetails,
+    required this.loginWithAuthentik,
     required this.downloadServerResources,
   });
 
@@ -57,6 +58,10 @@ class LauncherActions {
   final Future<void> Function(Map<String, Object?> event) copyLogEvent;
   final Future<void> Function() deleteLogHistory;
   final VoidCallback toggleImportDetails;
+
+  /// Opens the server's authentik page inside the app and stores the token it
+  /// returns; the pages never reach the network themselves.
+  final Future<void> Function() loginWithAuthentik;
 
   /// Downloads the latest resource ZIP from the configured save server and
   /// imports it; the page never reaches the network itself.

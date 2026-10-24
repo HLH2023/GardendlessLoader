@@ -53,6 +53,13 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".login.LoginActivity"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|density|uiMode|locale|layoutDirection|fontScale"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/LoginTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".game.GameActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|density|uiMode"
             android:exported="false"

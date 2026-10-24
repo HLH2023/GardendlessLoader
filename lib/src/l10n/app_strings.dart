@@ -212,6 +212,7 @@ class AppStrings {
   // Settings page: loader.
   String get noUpdate => _t('无可用更新', 'No update');
   String get currentVersion => _t('当前版本', 'Current');
+  String get buildNumber => _t('构建号', 'Build');
   String get latestVersion => _t('最新版本', 'Latest');
   String get autoCheckHint => _t(
         '进入启动器时会自动检查，也可以点右上角的刷新图标手动检查。',
@@ -270,9 +271,11 @@ class AppStrings {
   // Settings page: save server.
   String get saveServer => _t('云存档服务器', 'Save server');
   String get saveServerSubtitle => _t(
-        '用于云存档与从服务器下载游戏资源。地址与令牌只保存在本机，不进仓库。',
-        'Used for cloud saves and for downloading game resources. The address '
-            'and token stay on this device and never enter the repository.',
+        '用于云存档与从服务器下载游戏资源。在应用内用 authentik 登录即可，'
+            '地址与令牌只保存在本机，不进仓库。',
+        'Used for cloud saves and for downloading game resources. Sign in with '
+            'authentik inside the app; the address and token stay on this '
+            'device and never enter the repository.',
       );
   String get saveServerAddress => _t('服务器地址', 'Server address');
   String get saveServerAddressHint =>
@@ -280,6 +283,44 @@ class AppStrings {
   String get deviceToken => _t('设备令牌', 'Device token');
   String get deviceTokenHint =>
       _t('在浏览器签发后粘贴到这里', 'Paste the token issued in the browser');
+
+  // Settings page: in-app authentik sign-in.
+  String get cloudLoginTitle => _t('登录云存档服务器', 'Sign in to the save server');
+  String get cloudLoginAction =>
+      _t('使用 authentik 登录', 'Sign in with authentik');
+  String get cloudLoginOpening => _t('正在打开登录页…', 'Opening the sign-in page…');
+  String get cloudLoginVerifying =>
+      _t('正在验证设备令牌…', 'Verifying the device token…');
+  String get cloudLoginSucceeded => _t('已登录', 'Signed in');
+  String get cloudLoginSignedOut => _t('未登录', 'Not signed in');
+  String get cloudLoginAutoSaveHint => _t(
+        '登录成功后会自动保存设备令牌，无需手动复制。',
+        'The device token is saved automatically after sign-in; there is nothing to copy.',
+      );
+  String cloudLoginSucceededAs(String account) =>
+      _t('已登录：$account', 'Signed in as $account');
+  String get cloudLoginStoredToken =>
+      _t('已保存设备令牌，身份尚未验证', 'Device token saved; identity not verified');
+  String get cloudLoginVerifyIdentity => _t('验证身份', 'Verify identity');
+  String get cloudLoginFailed => _t('登录失败', 'Sign-in failed');
+  String get cloudLoginRequired => _t(
+        '登录后即可使用云存档，并从服务器下载资源。',
+        'Sign in to use cloud saves and download resources from the server.',
+      );
+  String get cloudLoginManualSection =>
+      _t('高级：手动填写令牌', 'Advanced: enter a token manually');
+  String get cloudLoginManualHint => _t(
+        '只有在无法使用应用内登录时，才需要手动粘贴令牌。',
+        'Only paste a token by hand when in-app sign-in is unavailable.',
+      );
+  String get cloudLoginServerMissing =>
+      _t('请先填写服务器地址，再登录。', 'Set the server address before signing in.');
+  String get cloudLoginGoToSettings => _t('前往设置', 'Open settings');
+  String get cloudLoginSignInAgain => _t('重新登录', 'Sign in again');
+  String get cloudLoginUnsupported => _t(
+        '当前安装包不支持应用内登录，请手动填写令牌。',
+        'This build cannot show the in-app sign-in; enter a token manually.',
+      );
   String get saveServerInvalid => _t(
         '地址无效：请填写以 https:// 开头的完整地址',
         'Invalid address: use a full URL starting with https://',

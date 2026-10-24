@@ -66,6 +66,7 @@ class AppSettings {
     this.gestureHintShown = false,
     this.serverBaseUrl = kDefaultServerBase,
     this.deviceToken = '',
+    this.deviceAccount = '',
   });
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -87,6 +88,7 @@ class AppSettings {
       gestureHintShown: json['gestureHintShown'] as bool? ?? false,
       serverBaseUrl: _readBaseUrl(json['serverBaseUrl']),
       deviceToken: (json['deviceToken'] as String? ?? '').trim(),
+      deviceAccount: (json['deviceAccount'] as String? ?? '').trim(),
     );
   }
 
@@ -121,8 +123,12 @@ class AppSettings {
   final String serverBaseUrl;
 
   /// The device token the user issued at `{server}/_save/app.html`; empty
-  /// means cloud features stay off. Only ever pasted at runtime.
+  /// means cloud features stay off. Only ever stored at runtime.
   final String deviceToken;
+
+  /// Name the server reported for [deviceToken] at sign-in (`whoami`); empty
+  /// until the identity has been verified. Never a secret.
+  final String deviceAccount;
 
   /// The server this app talks to: the value saved in settings, else the one
   /// compiled in. Empty when neither is a usable https URL.
@@ -151,6 +157,7 @@ class AppSettings {
     bool? gestureHintShown,
     String? serverBaseUrl,
     String? deviceToken,
+    String? deviceAccount,
   }) {
     return AppSettings(
       watermarkEnabled: watermarkEnabled ?? this.watermarkEnabled,
@@ -169,6 +176,7 @@ class AppSettings {
       gestureHintShown: gestureHintShown ?? this.gestureHintShown,
       serverBaseUrl: serverBaseUrl ?? this.serverBaseUrl,
       deviceToken: deviceToken ?? this.deviceToken,
+      deviceAccount: deviceAccount ?? this.deviceAccount,
     );
   }
 
@@ -187,6 +195,7 @@ class AppSettings {
         'gestureHintShown': gestureHintShown,
         'serverBaseUrl': serverBaseUrl,
         'deviceToken': deviceToken,
+        'deviceAccount': deviceAccount,
       };
 }
 

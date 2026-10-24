@@ -101,6 +101,22 @@ class RemoteResourceManifest {
   }
 }
 
+/// `GET {base}/_save/app/whoami`: the identity a device token belongs to.
+class CloudIdentity {
+  const CloudIdentity({required this.user});
+
+  factory CloudIdentity.fromJson(Map<String, dynamic> json) {
+    final user = json['user'];
+    if (user is! String || user.trim().isEmpty) {
+      throw const FormatException('whoami has no user');
+    }
+    return CloudIdentity(user: user.trim());
+  }
+
+  /// Account name the server reports; shown in Settings after a sign-in.
+  final String user;
+}
+
 /// Bytes of one download attempt, for the progress bar.
 class RemoteDownloadProgress {
   const RemoteDownloadProgress({
@@ -196,6 +212,42 @@ class RemoteResourceService {
       return RemoteResourceManifest.fromJson(decoded);
     } on FormatException catch (error) {
       throw RemoteResourceFailure('resource_manifest_invalid', error.message);
+    }
+  }
+
+  /// Verifies a device token and returns the identity it belongs to.
+  ///
+  /// `GET {base}/_save/app/whoami` answers `{"user": "..."}` for a live token
+  /// and 401/403 once it has been revoked, which is what the sign-in screen
+  /// shows the user before saving anything.
+  Future<CloudIdentity> fetchWhoami({
+    required String token,
+    required String baseUrl,
+    Duration timeout = saveServerRequestTimeout,
+  }) async {
+    final body = await _getText(
+      _resolve(baseUrl, saveWhoamiPath),
+      token: token,
+      timeout: timeout,
+      maxBytes: saveServerManifestMaxBytes,
+      code: 'save_login_unverified',
+    );
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException catch (error) {
+      throw RemoteResourceFailure('save_login_unverified', error.message);
+    }
+    if (decoded is! Map<String, dynamic>) {
+      throw const RemoteResourceFailure(
+        'save_login_unverified',
+        '身份校验响应不是 JSON 对象',
+      );
+    }
+    try {
+      return CloudIdentity.fromJson(decoded);
+    } on FormatException catch (error) {
+      throw RemoteResourceFailure('save_login_unverified', error.message);
     }
   }
 

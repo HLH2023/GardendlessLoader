@@ -97,6 +97,42 @@ class _ServerResourcesCard extends StatelessWidget {
               strings.saveServerNotConfigured,
               style: scopeText.copyWith(color: palette.warning),
             ),
+            const SizedBox(height: 10),
+            Text(strings.cloudLoginRequired, style: scopeText),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: controller.cloudServerAddressConfigured
+                  ? GardenButton(
+                      key: const ValueKey('server-resources-login'),
+                      label: strings.cloudLoginAction,
+                      icon: Icons.login_rounded,
+                      tone: GardenButtonTone.primary,
+                      compact: true,
+                      busy: controller.cloudLoginInProgress,
+                      onPressed: controller.cloudLoginSupported
+                          ? () => actions.loginWithAuthentik()
+                          : null,
+                    )
+                  : GardenButton(
+                      key: const ValueKey('server-resources-settings'),
+                      label: strings.cloudLoginGoToSettings,
+                      icon: Icons.settings_outlined,
+                      tone: GardenButtonTone.secondary,
+                      compact: true,
+                      onPressed: () =>
+                          actions.navigate(LauncherDestination.settings),
+                    ),
+            ),
+            if (controller.cloudLogin.phase == CloudLoginPhase.failed &&
+                controller.cloudLogin.message != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                controller.cloudLogin.message!,
+                style:
+                    scopeText.copyWith(color: palette.danger, fontSize: 12.5),
+              ),
+            ],
           ] else if (!supported) ...[
             const SizedBox(height: 10),
             Text(

@@ -66,6 +66,7 @@ class _HomePageState extends State<HomePage> {
     deleteLogHistory: _deleteLogHistory,
     toggleImportDetails: () =>
         setState(() => _importDetailsExpanded = !_importDetailsExpanded),
+    loginWithAuthentik: _controller.loginWithAuthentik,
     downloadServerResources: _downloadServerResources,
   );
 

@@ -12,6 +12,20 @@ const defaultLatestReleaseApiUrl =
 const defaultUpdateCheckTimeout = Duration(seconds: 5);
 const defaultUpdateCheckMaxBytes = 64 * 1024;
 
+/// What the installed package reports about itself.
+class InstalledAppBuild {
+  const InstalledAppBuild({
+    required this.versionName,
+    required this.buildNumber,
+  });
+
+  /// `package_info` versionName, e.g. `0.9.0-hlh.1`.
+  final String versionName;
+
+  /// Android versionCode as a string; empty when the platform cannot say.
+  final String buildNumber;
+}
+
 class UpdateInfo {
   const UpdateInfo({
     required this.currentVersion,
@@ -47,6 +61,21 @@ class UpdateCheckService {
       _installedVersionLoading = null;
       return value;
     });
+  }
+
+  /// The installed APK's versionName and versionCode, including the personal
+  /// build stamp (`0.9.0-hlh.1` / `90001`) written by tools/bump-version.sh.
+  Future<InstalledAppBuild> loadInstalledBuild() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      final name = info.version.trim();
+      return InstalledAppBuild(
+        versionName: name.isEmpty ? appVersion : name,
+        buildNumber: info.buildNumber.trim(),
+      );
+    } catch (_) {
+      return const InstalledAppBuild(versionName: appVersion, buildNumber: '');
+    }
   }
 
   /// Returns the latest release version, and the release itself when it is
