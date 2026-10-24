@@ -213,7 +213,8 @@ class _AppUpdatePanel extends StatelessWidget {
     final canInstall = supported &&
         !status.active &&
         release != null &&
-        status.phase == AppUpdatePhase.ready;
+        (status.phase == AppUpdatePhase.ready ||
+            controller.appUpdateInstallReady);
 
     return SurfaceCard(
       key: const ValueKey('app-update'),

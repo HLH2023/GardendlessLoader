@@ -243,6 +243,10 @@ class AppController extends ChangeNotifier {
 
   /// Only Android can hand a downloaded APK to the system installer.
   bool get appUpdateInstallSupported => _appInstallService.supported;
+
+  /// A verified installer is on disk and can be handed to the system again,
+  /// e.g. after the user granted the unknown-sources permission.
+  bool get appUpdateInstallReady => _appUpdateFile != null;
   ({String? code, String message})? get remoteManifestFailure =>
       _remoteManifestFailure;
   bool get remoteManifestLoading => _remoteManifestLoading;
