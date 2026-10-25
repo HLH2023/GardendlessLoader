@@ -306,3 +306,59 @@
 - 安卓真机点击：用户执行，清单在 `docs/acceptance-android.md`。
 - Windows 真实安装目录的「退出并自动更新」：首次执行时观察（失败会回滚并重启）。
 - 公开仓历史域名清理（B-15）：需要用户决定是否 force-push。
+
+## R-20261025-01（hlh.19 热修）/ orchestrator(opencode) / 2026-10-25T15:20+08:00
+
+- status: review
+- 版本: `0.9.0-hlh.18+90018` → `0.9.0-hlh.19+90019`
+- 触发：用户在 Windows 安装 hlh.18 后无法打开
+
+### 现象 → 根因 → 改法 → 断言
+
+#### Windows 双击没有界面（P0）
+- **现象**：hlh.18 解压后双击 `gardendless_loader.exe`，进程在但不出现界面。
+- **根因**：`main()` 第一步调用 `NativeAppLogger.initialize`，该通道
+  `io.github.dey410.gardendlessloader/app_logger` 只有 Android/iOS/OHOS 实现；
+  Windows 返回 `MissingPluginException`，`runApp` 从未执行。用 SSH 启动并重定向
+  stderr 复现到完整堆栈（`NativeAppLogger.initialize` 第 22 行）。
+- **改法**：`NativeAppLogger.initialize` 捕获 `MissingPluginException` /
+  `PlatformException` / `FormatException`，退回 `InMemoryAppLogger`；`main` 外层
+  再加一层 try/catch。日志页仍可看本次会话事件，标记 `persisting=false`。
+- **断言**：`check_game_host_contract.dart` 5 条（降级分支、内存快照、main 继续启动、
+  会话令牌失败关闭、更新入口拒绝盘符根目录）；Windows 实机启动验证见下。
+
+#### 会话令牌失败回退到设备令牌（P1，安全回归）
+- **现象**：`/token/session` 抖动或旧服务端 404 时，页面拿到的是长期设备令牌。
+- **改法**：失败即 `return ''`（本次启动不注入存档桥），绝不回退。
+- **断言**：`check_game_host_contract.dart` 的「会话令牌失败时不回退到设备令牌」。
+
+#### 存储迁移可把父目录当成目标（P1，数据丢失）
+- **现象**：把资源根从 `...\Gardendless` 改到 `...`（父目录）会先删除父目录里同名的
+  `downloads` / `settings.json`，再搬入。
+- **改法**：`validate()` 同时拒绝「目标在当前目录内」与「目标在当前目录的上级」。
+- **断言**：`check_storage_migration.dart` 新增「当前目录的上级目录被拒」（63 项）。
+
+#### Windows 更新脚本带空格路径必失败（P1）
+- **现象**：安装在 `Program Files` 时 robocopy 参数被空格拆开，备份失败退出。
+- **改法**：`-ArgumentList` 改为显式加引号的字符串；回滚改 `/MIR`；拒绝盘符根目录；
+  失败路径清理 stage；残留进程按 `Target + '\'` 边界匹配。
+- **断言**：`check_update_manifest.dart` 新增 5 条（引号、盘符根、/MIR、stage 清理、
+  进程边界；共 27 项）。
+
+### 验证（实测）
+- `flutter analyze`：No issues found
+- 客户端 5 套：43 + 63 + 11 + 39 + 27 = **183 通过 / 0 失败**
+- 服务端 4 套：70 + 19 + 35 + 41 = **165 通过 / 0 失败**
+- Windows：解压 hlh.19 新包后启动，`exited=False`，stderr 无
+  `MissingPluginException`，`%APPDATA%\io.github.dey410\gardendless_loader` 已创建
+- 更新通道：APK / Windows 清单均返回 200，`latest=90019`，size/sha 与磁盘一致，
+  zip 下载 200
+- Release：`v0.9.0-hlh.19` 两个资产 `uploaded`
+
+### 产物
+- APK 58,634,580 B `30a6ac27a29656c7bdf2810572c3fc8fcd87b3a0b45dc6f6fc2c65f950de0b6e`
+- Windows zip 190,010,310 B `ec606fdf58767e8aecff18e19f9da27a82d40f2e76036ed593004029356e33fb`
+
+### 遗留
+- B-18（新增）：管理页只显示 legacy 存档，按版本分区的存档不可见。
+- 安卓真机验收与 Windows 首次自动更新仍需用户点击。

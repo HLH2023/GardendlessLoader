@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
   "project": "GardendlessLoader",
-  "updatedAt": "2026-10-25T14:50:13+08:00",
+  "updatedAt": "2026-10-25T15:14:34+08:00",
   "updatedBy": "orchestrator/opencode",
   "release": {
     "versionName": "0.9.0-hlh.19",
     "versionCode": 90019,
-    "apkSha256": "",
-    "apkBytes": 0,
-    "windowsSha256": "",
-    "windowsBytes": 0,
-    "releaseUrl": null,
-    "pendingPublish": true
+    "apkSha256": "30a6ac27a29656c7bdf2810572c3fc8fcd87b3a0b45dc6f6fc2c65f950de0b6e",
+    "apkBytes": 58634580,
+    "windowsSha256": "ec606fdf58767e8aecff18e19f9da27a82d40f2e76036ed593004029356e33fb",
+    "windowsBytes": 190010310,
+    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.19",
+    "pendingPublish": false
   },
   "branches": {
     "upstream": {
@@ -556,6 +556,141 @@
         "无（本轮已按要求执行部署、发布与 Release；后续只需用户真机验收）"
       ],
       "verifyOutput": "== 文件齐备 ==\n  ok   存在 .handoff/PROTOCOL.md\n  ok   存在 .handoff/HANDOFF.md\n  ok   存在 .handoff/state.json\n  ok   存在 .handoff/docs/01-architecture.md\n  ok   存在 .handoff/docs/02-branches.md\n  ok   存在 .handoff/docs/03-versioning.md\n  ok   存在 .handoff/docs/04-build.md\n  ok   存在 .handoff/docs/05-deployment.md\n  ok   存在 .handoff/docs/06-testing.md\n  ok   存在 .handoff/docs/07-backlog.md\n  ok   存在 .handoff/docs/08-handoff-log.md\n  ok   存在 .handoff/prompts/01-start.md\n  ok   存在 .handoff/prompts/02-return.md\n  ok   存在 .handoff/skills/gardendless-dev/SKILL.md\n\n== state.json 结构 ==\n  ok   OK review suites= 9 total= 334\n\n== 回执完整性 ==\n  ok   OK 3 条回执字段完整\n\n== 敏感信息扫描（.handoff + AGENTS.md + tools/handoff.sh） ==\n  ok   未发现服务器地址/令牌字面量\n\n== 源码敏感扫描（lib/tool/android/.github/pubspec/docs） ==\n  ok   源码与配置未出现服务器地址/令牌\n\n== AGENTS.md 只放持久信息 ==\n  ok   未出现版本号/任务号/测试数字/哈希等易变事实\n\n== Windows 构建脚本编码 ==\n  ok   build-windows.ps1 为 UTF-8 BOM + CRLF（bom-ok crlf=70 lf_only=0）\n\n== 短提示词长度 ==\n  ok   01-start.md 共 9 行（≤14）\n\n== 技能安装 ==\n  ok   已装入 opencode 全局 skills\n\n结果：22 通过 / 0 失败 / 0 警告"
+    },
+    {
+      "taskId": "R-20261025-01",
+      "by": "orchestrator/opencode",
+      "at": "2026-10-25T15:14:34+08:00",
+      "status": "review",
+      "readBack": {
+        "taskTitle": "hlh.19 热修：Windows 无法启动 + 令牌回退 + 迁移/更新健壮性",
+        "versionBefore": "0.9.0-hlh.18 (90018)",
+        "testsBaseline": "334 项",
+        "versionAfter": "0.9.0-hlh.19 (90019)",
+        "testsAfter": "348 项（165 服务端 + 183 客户端）"
+      },
+      "changed": [
+        "lib/src/logging/native_app_logger.dart：通道不可用（Windows）时降级 InMemoryAppLogger，日志页可用但标记未持久化",
+        "lib/main.dart：日志初始化失败不再阻断 runApp；移除对具体 NativeAppLogger 类型的依赖",
+        "lib/src/app_controller.dart：/token/session 失败时失败关闭（return ''），不再把设备令牌注入页面",
+        "lib/src/services/storage_migration.dart：validate() 拒绝目标为当前资源目录的上级（防删除父目录同名文件）",
+        "lib/src/services/windows_updater.dart：robocopy 参数显式加引号；/MIR 回滚；拒绝盘符根目录；失败清理 stage；进程匹配按目录边界",
+        "tool/check_game_host_contract.dart：+5 条启动/令牌契约断言",
+        "tool/check_update_manifest.dart：+5 条更新脚本断言",
+        "tool/check_storage_migration.dart：+1 条上级目录拒绝断言",
+        ".handoff/docs/06|07|08、HANDOFF.md、state.json：基线 348、hlh.19 发布信息、B-18 记录",
+        "docs/releases/v0.9.0-hlh.19.md（新）",
+        "pubspec.yaml：0.9.0-hlh.19+90019"
+      ],
+      "commands": [
+        "flutter analyze -> No issues found! (ran in 6.0s)",
+        "dart run tool/check_local_server.dart -> 43 通过 / 0 失败",
+        "dart run tool/check_storage_migration.dart -> 63 通过 / 0 失败",
+        "dart run tool/check_desktop_zip.dart /tmp/opencode/fixtures/pack.zip -> 11 通过 / 0 失败",
+        "dart run tool/check_game_host_contract.dart -> 39 通过 / 0 失败",
+        "dart run tool/check_update_manifest.dart -> 27 通过 / 0 失败",
+        "cd /home/hlh/pvzge && bash tools/test-cloud-saves.sh -> 70 通过 / 0 失败（含新增 3 条管理接口越界断言）",
+        "cd /home/hlh/pvzge && python3 tools/test-concurrency.py -> 19 通过 / 0 失败",
+        "cd /home/hlh/pvzge && bash tools/test-save-versions.sh -> 35 通过 / 0 失败",
+        "cd /home/hlh/pvzge && node tools/test-sync-offline.js -> 41 通过 / 0 失败",
+        "cd /home/hlh/pvzge && bash tools/deploy-save-api.sh -> healthz ok；/load 200；/save 200",
+        "解压 hlh.19 Windows 包并启动：exited=False，stderr 无 MissingPluginException，%APPDATA%\\io.github.dey410\\gardendless_loader 已创建",
+        "bash tools/build-apk.sh --release -> 58,634,580 B；aapt2 versionCode 90019 / versionName 0.9.0-hlh.19；apksigner v1/v2/v3 全 true",
+        "ssh win build-windows.ps1 -> gardendless-loader-0.9.0-hlh.19-90019-windows-x64.zip 190,010,310 B；exe 版本资源含 0.9.0-hlh.19",
+        "publish-windows.sh / publish-apk.sh -> manifest latest=90019，size/sha 与磁盘一致，zip 下载 200",
+        "GitHub API 创建 Release v0.9.0-hlh.19（201），两个资产上传 201 且 state=uploaded"
+      ],
+      "tests": {
+        "analyze": "No issues found",
+        "suites": [
+          {
+            "name": "server/cloud-saves",
+            "passed": 70,
+            "failed": 0,
+            "total": 70
+          },
+          {
+            "name": "server/concurrency",
+            "passed": 19,
+            "failed": 0,
+            "total": 19
+          },
+          {
+            "name": "server/save-versions",
+            "passed": 35,
+            "failed": 0,
+            "total": 35
+          },
+          {
+            "name": "server/sync-offline",
+            "passed": 41,
+            "failed": 0,
+            "total": 41
+          },
+          {
+            "name": "client/local-server",
+            "passed": 43,
+            "failed": 0,
+            "total": 43
+          },
+          {
+            "name": "client/storage-migration",
+            "passed": 63,
+            "failed": 0,
+            "total": 63
+          },
+          {
+            "name": "client/desktop-zip",
+            "passed": 11,
+            "failed": 0,
+            "total": 11
+          },
+          {
+            "name": "client/game-host-contract",
+            "passed": 39,
+            "failed": 0,
+            "total": 39
+          },
+          {
+            "name": "client/update-manifest",
+            "passed": 27,
+            "failed": 0,
+            "total": 27
+          }
+        ],
+        "total": 348,
+        "passed": 348,
+        "failed": 0,
+        "skipped": 0
+      },
+      "artifacts": [
+        {
+          "path": "dist/gardendless-loader-0.9.0-hlh.19.apk",
+          "bytes": 58634580,
+          "sha256": "30a6ac27a29656c7bdf2810572c3fc8fcd87b3a0b45dc6f6fc2c65f950de0b6e"
+        },
+        {
+          "path": "dist/gardendless-loader-0.9.0-hlh.19-90019-windows-x64.zip",
+          "bytes": 190010310,
+          "sha256": "ec606fdf58767e8aecff18e19f9da27a82d40f2e76036ed593004029356e33fb"
+        },
+        {
+          "path": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.19",
+          "bytes": 0,
+          "sha256": "",
+          "note": "两个资产 state=uploaded"
+        }
+      ],
+      "remaining": [
+        "安卓真机验收（用户执行）：docs/acceptance-android.md。",
+        "Windows 首次自动更新需用户在真实安装目录点一次；hlh.19 更新脚本只在沙盒验证过。",
+        "B-18：管理页只显示 legacy 存档，按版本分区的存档不可见（已写入 07-backlog）。",
+        "Windows 上日志不落盘（降级为内存），日志页会显示未持久化；需要持久化要补原生实现。"
+      ],
+      "needsHermes": [
+        "无（本轮已完成服务端部署、双端发布与 Release）"
+      ],
+      "verifyOutput": "== 文件齐备 ==\n  ok   存在 .handoff/PROTOCOL.md\n  ok   存在 .handoff/HANDOFF.md\n  ok   存在 .handoff/state.json\n  ok   存在 .handoff/docs/01-architecture.md\n  ok   存在 .handoff/docs/02-branches.md\n  ok   存在 .handoff/docs/03-versioning.md\n  ok   存在 .handoff/docs/04-build.md\n  ok   存在 .handoff/docs/05-deployment.md\n  ok   存在 .handoff/docs/06-testing.md\n  ok   存在 .handoff/docs/07-backlog.md\n  ok   存在 .handoff/docs/08-handoff-log.md\n  ok   存在 .handoff/prompts/01-start.md\n  ok   存在 .handoff/prompts/02-return.md\n  ok   存在 .handoff/skills/gardendless-dev/SKILL.md\n\n== state.json 结构 ==\n  ok   OK review suites= 9 total= 348\n\n== 回执完整性 ==\n  ok   OK 5 条回执字段完整\n\n== 敏感信息扫描（.handoff + AGENTS.md + tools/handoff.sh） ==\n  ok   未发现服务器地址/令牌字面量\n\n== 源码敏感扫描（lib/tool/android/.github/pubspec/docs） ==\n  ok   源码与配置未出现服务器地址/令牌\n\n== AGENTS.md 只放持久信息 ==\n  ok   未出现版本号/任务号/测试数字/哈希等易变事实\n\n== Windows 构建脚本编码 ==\n  ok   build-windows.ps1 为 UTF-8 BOM + CRLF（bom-ok crlf=70 lf_only=0）\n\n== 短提示词长度 ==\n  ok   01-start.md 共 9 行（≤14）\n\n== 技能安装 ==\n  ok   已装入 opencode 全局 skills\n\n结果：22 通过 / 0 失败 / 0 警告"
     }
   ],
   "handoffLog": [
@@ -600,6 +735,13 @@
       "event": "deploy-release",
       "task": "R-20261025-01",
       "note": "部署 pvzge-save（HISTORY_KEEP=300）、落地注入脚本、发布 APK/Windows 更新清单、创建 v0.9.0-hlh.18 Release；cloud-saves 67/0"
+    },
+    {
+      "at": "2026-10-25T15:14:34+08:00",
+      "by": "orchestrator/opencode",
+      "event": "hotfix-release",
+      "task": "R-20261025-01",
+      "note": "hlh.19：修复 Windows 日志通道缺失导致的无法启动；会话令牌失败关闭；迁移父目录保护；更新脚本引号/回滚；348 项全绿；已发布"
     }
   ]
 }
