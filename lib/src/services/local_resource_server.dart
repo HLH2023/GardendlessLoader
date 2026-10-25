@@ -322,6 +322,11 @@ class LocalResourceServer {
 
   /// HTML 注入（本地与在线两条路径共用）。
   Future<Uint8List> _injectInto(String html) async {
+    // 未登录（桥脚本为空）时不注入标签：否则页面会去请求 bridge.js 拿到 404，
+    // 控制台一片红，还会掩盖真正的错误。
+    if (_bridgeScript.isEmpty) {
+      return Uint8List.fromList(utf8.encode(html));
+    }
     final bridge = '<script src="/__pvz_$_nonce/bridge.js"></script>';
     final ui = _uiScript.isEmpty
         ? ''

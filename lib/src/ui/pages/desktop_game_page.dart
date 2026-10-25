@@ -81,8 +81,12 @@ class _DesktopGamePageState extends State<DesktopGamePage> {
   }
 
   Future<void> _exit() async {
-    await widget.onClosed();
-    if (mounted) Navigator.of(context).maybePop();
+    // 收尾（停服务器/注销会话）失败也必须能退出：卡在游戏页出不来更糟
+    try {
+      await widget.onClosed();
+    } finally {
+      if (mounted) Navigator.of(context).maybePop();
+    }
   }
 
   @override
