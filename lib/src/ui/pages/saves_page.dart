@@ -89,6 +89,11 @@ class _SavesPageState extends State<SavesPage> {
               else ...[
                 _SummaryCard(controller: controller),
                 const SizedBox(height: 14),
+                _Notice(
+                  text: strings.savesUploadHint,
+                  color: palette.inkMuted,
+                ),
+                const SizedBox(height: 14),
                 if (controller.cloudSavesError != null)
                   _Notice(
                     text: _errorText(strings, controller.cloudSavesError!),
@@ -277,6 +282,13 @@ class _SaveEntryCard extends StatelessWidget {
               ),
             ],
           ),
+          if (entry.deviceLabel.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              '${strings.savesWrittenBy} ${entry.deviceLabel}',
+              style: TextStyle(color: palette.inkFaint, fontSize: 12),
+            ),
+          ],
           if (summaryBits.isNotEmpty) ...[
             const SizedBox(height: 10),
             Text(

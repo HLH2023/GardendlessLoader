@@ -65,9 +65,13 @@ Future<void> main() async {
     } else {
       check('玩家进度存在', false);
     }
+    final withDevice = snapshot.entries.where((e) => e.deviceLabel.isNotEmpty);
+    check('最后写入设备可读', withDevice.isNotEmpty,
+        withDevice.map((e) => '${e.key}=${e.deviceLabel}').join(', '));
     for (final entry in snapshot.entries) {
       stdout.writeln('       · ${entry.key}: ${entry.bytes} B, '
-          'mtime=${entry.mtime}, summary=${entry.summary}');
+          'mtime=${entry.mtime}, device=${entry.deviceLabel.isEmpty ? '-' : entry.deviceLabel}, '
+          'summary=${entry.summary}');
     }
 
     stdout.writeln('[2] /history 解析');

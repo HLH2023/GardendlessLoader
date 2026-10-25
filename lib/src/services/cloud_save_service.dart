@@ -13,6 +13,7 @@ class CloudSaveEntry {
     required this.bytes,
     required this.mtime,
     required this.summary,
+    this.deviceLabel = '',
   });
 
   final String key;
@@ -23,6 +24,9 @@ class CloudSaveEntry {
 
   /// 服务端对可摘要键返回的统计（玩家名、金币、宝石…），其余键为空。
   final Map<String, Object?> summary;
+
+  /// 最后写这份存档的设备标签，例如 `PLG110 · Chrome 155`；空表示未知。
+  final String deviceLabel;
 
   DateTime? get lastWrite =>
       mtime > 0 ? DateTime.fromMillisecondsSinceEpoch(mtime * 1000) : null;
@@ -61,11 +65,14 @@ class CloudSaveSnapshot {
     }
     final mtime = _mapOf(json['mtime']);
     final summary = _mapOf(json['summary']);
+    final device = _mapOf(json['device']);
     final entries = <CloudSaveEntry>[];
     for (final entry in mtime.entries) {
       final key = entry.key;
       final stamp = _asInt(entry.value) ?? 0;
       if (key.isEmpty) continue;
+      final deviceInfo = _mapOf(device[key], allowNull: true);
+      final label = deviceInfo['label'];
       entries.add(
         CloudSaveEntry(
           key: key,
@@ -73,6 +80,7 @@ class CloudSaveSnapshot {
           bytes: _bytesOf(summary[key]),
           mtime: stamp,
           summary: _mapOf(summary[key], allowNull: true),
+          deviceLabel: label is String ? label : '',
         ),
       );
     }

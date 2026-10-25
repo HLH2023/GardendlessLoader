@@ -283,7 +283,14 @@ class AppStrings {
       );
   String get savesRestoreDone => _t('已回滚，重启游戏后生效', 'Rolled back; restart the game');
   String get savesRestoreFailed => _t('回滚失败', 'Roll back failed');
-  String get savesWrittenBy => _t('写入设备', 'Written by');
+  String get savesWrittenBy => _t('最后写入', 'Last written by');
+  String get savesUploadHint => _t(
+        '本机存档正在游戏里自动上传（约 3 秒防抖）；想立刻推一次，进游戏点右下角「↑ 上传」。'
+        '这页读不到游戏 WebView 里的数据，所以只能看云端这一侧。',
+        'This device uploads automatically from inside the game (3 s debounce). '
+            'To push right now, open the game and tap the "↑ Upload" button. '
+            'This page can only see the cloud side.',
+      );
   String get savesPlayer => _t('玩家', 'Player');
   String get savesCoin => _t('金币', 'Coins');
   String get savesGem => _t('宝石', 'Gems');
