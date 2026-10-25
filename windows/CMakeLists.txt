@@ -39,11 +39,21 @@ add_definitions(-DUNICODE -D_UNICODE)
 # of modifying this function.
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_17)
+  # /WX 会把警告当错误：中文（代码页 936）系统下 MSVC 读 UTF-8 源码会报
+  # C4819（"该文件包含不能在当前代码页中表示的字符"），进而 C2220 构建失败。
+  # 显式声明源码是 UTF-8，并把 C4819 降级，保证中文系统也能本地构建。
+  target_compile_options(${TARGET} PRIVATE /utf-8 /wd"4819")
   target_compile_options(${TARGET} PRIVATE /W4 /WX /wd"4100")
   target_compile_options(${TARGET} PRIVATE /EHsc)
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
 endfunction()
+
+# 全局兜底：插件（如 webview_cef）的源码也是 UTF-8，中文区域下同样需要
+if(MSVC)
+  add_compile_options(/utf-8)
+  add_compile_options(/wd"4819")
+endif()
 
 # Flutter library and tool build rules.
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")

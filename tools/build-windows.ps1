@@ -1,4 +1,4 @@
-# Windows 端构建脚本（在 Windows 构建机上执行）
+﻿# Windows 端构建脚本（在 Windows 构建机上执行）
 #
 # 前置（一次性）：
 #   1. Flutter SDK（3.41.x，与 Linux/CI 对齐）解压到 C:\src\flutter，PATH 里有 flutter
@@ -17,19 +17,22 @@ param(
     [string]$OutDir = ""
 )
 
-$ErrorActionPreference = "Stop"
+# 注意：不能用 "Stop"。PowerShell 5.1 会把原生命令写到 stderr 的内容
+# （CMake 的 Warning、flutter 的进度行）当成 terminating error，
+# 构建明明成功也会被中断。改为 Continue + 显式检查 $LASTEXITCODE。
+$ErrorActionPreference = "Continue"
 $repo = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $repo
 
 Write-Host "== 环境检查 ==" -ForegroundColor Cyan
-flutter --version
+& flutter --version 2>&1 | ForEach-Object { Write-Host $_ }
 if ($LASTEXITCODE -ne 0) { throw "找不到 flutter：把 Flutter SDK 的 bin 加到 PATH" }
 
 Write-Host "== flutter doctor（桌面工具链）==" -ForegroundColor Cyan
-flutter doctor -v | Select-String -Pattern "Visual Studio|Windows Version|Flutter version" -Context 0,2
+& flutter doctor -v 2>&1 | Select-String -Pattern "Visual Studio|Windows Version|Flutter version" -Context 0,2 | ForEach-Object { Write-Host $_ }
 
 Write-Host "== 依赖 ==" -ForegroundColor Cyan
-flutter pub get
+& flutter pub get 2>&1 | ForEach-Object { Write-Host $_ }
 if ($LASTEXITCODE -ne 0) { throw "flutter pub get 失败" }
 
 $defines = @()
@@ -41,7 +44,7 @@ if ($Server -ne "") {
 }
 
 Write-Host "== 构建 release ==" -ForegroundColor Cyan
-flutter build windows --release @defines
+& flutter build windows --release @defines 2>&1 | ForEach-Object { Write-Host $_ }
 if ($LASTEXITCODE -ne 0) { throw "flutter build windows 失败" }
 
 $release = "build\windows\x64\runner\Release"
