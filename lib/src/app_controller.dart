@@ -635,8 +635,13 @@ class AppController extends ChangeNotifier {
   /// 切换游玩形态（立即持久化）。
   Future<void> setPlayMode(PlayMode mode) async {
     if (_appSettings.playMode == mode) return;
-    if (_storageBusy || isImporting || _desktopGameActive || _gameLaunchInFlight) {
-      // 形态决定「资源从哪来」，跑到一半切换会让当前会话的来源与设置不一致
+    if (_storageBusy ||
+        isImporting ||
+        _desktopGameActive ||
+        _gameLaunchInFlight ||
+        resourceTransactionBusy(_manifest.transactionState)) {
+      // 形态决定「资源从哪来」，跑到一半切换会让当前会话的来源与设置不一致；
+      // 上个事务没恢复完（崩溃窗口）同样不能切。
       return;
     }
     await _updateAppSettings(_appSettings.copyWith(playMode: mode));
@@ -702,6 +707,11 @@ class AppController extends ChangeNotifier {
     }
     if (isImporting) {
       return '正在导入资源，请等导入完成再迁移';
+    }
+    if (resourceTransactionBusy(_manifest.transactionState)) {
+      // 上次导入/迁移没走完（断电、进程被杀）。先让启动恢复把槽收尾，
+      // 否则会把半成品目录整体搬到新位置。
+      return '上次资源导入未完成，请重启应用完成恢复后再迁移';
     }
     final target = Directory(path.trim());
     _storageBusy = true;
@@ -789,6 +799,25 @@ class AppController extends ChangeNotifier {
         _appSettingsStore = AppSettingsStore(_paths!.appSettingsFile);
         _appSettings = await _appSettingsStore!.read();
         _applyLanguage(_appSettings.languagePreference);
+        // 原生在线宿主发现令牌被拒（401）时会带 tokenRejected 原因退出。
+        // 引擎已销毁，这一步只能在下次启动做：清掉本地令牌并明确提示，
+        // 否则用户会一直看到「已登录但所有云功能静默失败」。
+        if (exitResultRequiresSignOut(
+            exitResult, hasToken: _appSettings.deviceToken.trim().isNotEmpty)) {
+          await signOutAccount();
+          _message = const LauncherMessage(
+            '登录状态已失效，请重新登录后再使用在线功能',
+            'save_token_rejected',
+          );
+          _appLogger.emit(
+            level: LogLevel.warn,
+            category: 'cloud.auth',
+            event: 'device_token_rejected',
+            outcome: LogOutcome.failed,
+            code: 'save_token_rejected',
+            context: <String, Object?>{'source': 'native_online_host'},
+          );
+        }
         _journalStore = GardenJournalStore(_paths!.journalFile);
         _journal = await _journalStore!.read();
         if (exitResult != null &&
@@ -1180,7 +1209,10 @@ class AppController extends ChangeNotifier {
     final manifestStore = _requireManifestStore();
     // 导入会重置并切换资源槽：游戏正在跑（桌面端本地服务器/安卓原生 loader
     // 正在读文件）或正在迁移存储位置时动手，会把正在读的目录抽走。
-    if (_desktopGameActive || _gameLaunchInFlight || _storageBusy) {
+    if (_desktopGameActive ||
+        _gameLaunchInFlight ||
+        _storageBusy ||
+        resourceTransactionBusy(_manifest.transactionState)) {
       const failure = '游戏正在运行或正在迁移资源，请先退出游戏再导入';
       _message = const LauncherMessage(failure, 'import_blocked_busy');
       notifyListeners();

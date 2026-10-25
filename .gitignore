@@ -92,3 +92,7 @@ yarn-error.log*
 /gradle/
 /gradlew
 /gradlew.bat
+
+# Local release artifacts
+# 产物只用于 Hermes 建 Release，不进版本库（*.apk/*.zip 已在上面忽略）
+dist/

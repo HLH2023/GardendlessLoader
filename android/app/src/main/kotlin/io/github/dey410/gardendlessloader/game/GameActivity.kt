@@ -47,6 +47,7 @@ class GameActivity : Activity() {
     private var pendingGpImportRequestId: String? = null
     private var pendingGpSelection: PendingGpSelection? = null
     private var returning = false
+    private var tokenRejectionHandled = false
     /** 在线形态的会话心跳；本地形态为 null。 */
     private var onlineHeartbeat: OnlineSessionHeartbeat? = null
     @Volatile private var destroyed = false
@@ -128,17 +129,30 @@ class GameActivity : Activity() {
         )
         // The resource handler inlines this into every served HTML document; the
         // WebView API for document-start scripts is missing on older WebViews.
-        webView.webViewClient = GameWebViewClient(session, buildDocumentStartScript()) { crashed ->
-            returnToLauncher(
-                GameExitReason.RENDERER_GONE,
-                if (crashed) "Android WebView renderer crashed" else "Android WebView renderer exited",
-            )
-        }
+        webView.webViewClient = GameWebViewClient(
+            session,
+            buildDocumentStartScript(),
+            onRendererGone = { crashed ->
+                returnToLauncher(
+                    GameExitReason.RENDERER_GONE,
+                    if (crashed) "Android WebView renderer crashed" else "Android WebView renderer exited",
+                )
+            },
+            onTokenRejected = {
+                // shouldInterceptRequest 在 WebView 的 IO 线程：退回启动器涉及
+                // startActivity 与 UI，必须切回主线程。
+                runOnUiThread { handleOnlineTokenRejected("resource_proxy") }
+            },
+        )
         webView.webChromeClient = GameChromeClient(::openFileChooser)
         // 在线形态：会话心跳必须在原生维持 —— Dart 侧引擎随 MainActivity
         // finish 一起销毁，定时器活不过一个 tick。
         if (session.mode == GameMode.ONLINE) {
-            onlineHeartbeat = OnlineSessionHeartbeat.fromSession(session)?.also { it.start() }
+            onlineHeartbeat = OnlineSessionHeartbeat.fromSession(
+                session,
+                onResult = ::logHeartbeatResult,
+                onTokenRejected = { runOnUiThread { handleOnlineTokenRejected("heartbeat") } },
+            )?.also { it.start() }
         }
         val viewport = GameViewportLayout(this, session.screenFit).apply {
             addView(webView)
@@ -469,12 +483,36 @@ class GameActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumedAt = SystemClock.elapsedRealtime()
+        logLifecycle("resumed")
     }
 
     override fun onPause() {
         super.onPause()
         if (resumedAt != 0L) playedMs += SystemClock.elapsedRealtime() - resumedAt
         resumedAt = 0L
+        logLifecycle("paused")
+    }
+
+    override fun onStop() {
+        super.onStop()
+        logLifecycle("stopped")
+    }
+
+    /**
+     * 生命周期埋点：切后台再回来是否还能继续加载，靠这几条判断
+     * 「WebView 被系统暂停」还是「网络/令牌失败」。
+     */
+    private fun logLifecycle(event: String) {
+        if (!::session.isInitialized) return
+        AppLogStore.emit(
+            source = "android",
+            level = "INFO",
+            category = "game.lifecycle",
+            event = "game_activity_$event",
+            outcome = "observed",
+            gameSessionId = session.sessionId,
+            context = mapOf("mode" to session.mode.wireName),
+        )
     }
 
     @Deprecated("Invoked by the Android framework")
@@ -485,6 +523,56 @@ class GameActivity : Activity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) enterImmersiveMode()
+    }
+
+    /**
+     * 在线心跳结果埋点。真机验收的核心证据：这条日志有 statusCode=200，
+     * 服务端的 `online/status` 就应该 >0；若是 401，说明令牌已失效。
+     */
+    private fun logHeartbeatResult(
+        phase: String,
+        statusCode: Int,
+        durationMs: Long,
+        error: Throwable?,
+    ) {
+        val ok = statusCode in 200..299
+        AppLogStore.emit(
+            source = "android",
+            level = if (ok) "INFO" else "WARN",
+            category = "game.heartbeat",
+            event = if (ok) "heartbeat_sent" else "heartbeat_failed",
+            outcome = if (ok) "succeeded" else "failed",
+            code = when {
+                error != null -> "heartbeat_network_error"
+                ok -> null
+                else -> "heartbeat_http_$statusCode"
+            },
+            gameSessionId = if (::session.isInitialized) session.sessionId else null,
+            durationMs = durationMs,
+            error = error,
+            context = mapOf("phase" to phase, "statusCode" to statusCode),
+        )
+    }
+
+    /**
+     * 在线令牌被服务端拒绝（401/403）。资源代理和心跳都可能先发现。
+     * 令牌失效后所有在线资源都会 401，游戏实际已不可用：退回启动器并
+     * 用 [GameExitReason.TOKEN_REJECTED] 让 Dart 侧清登录态。
+     */
+    private fun handleOnlineTokenRejected(source: String) {
+        if (tokenRejectionHandled || returning || !::session.isInitialized) return
+        tokenRejectionHandled = true
+        AppLogStore.emit(
+            source = "android",
+            level = "WARN",
+            category = "game.heartbeat",
+            event = "online_token_rejected",
+            outcome = "failed",
+            code = "save_token_rejected",
+            gameSessionId = session.sessionId,
+            context = mapOf("source" to source),
+        )
+        returnToLauncher(GameExitReason.TOKEN_REJECTED, "登录状态已失效，请重新登录")
     }
 
     fun returnToLauncher(reason: GameExitReason, message: String?) {

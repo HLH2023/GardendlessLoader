@@ -5,50 +5,52 @@
 
 ## P0
 
-### B-01 安卓在线形态缺真机验证
-- 现象：`OnlineGameResourceClient` / `OnlineSessionHeartbeat` 只做到编译与路由冒烟，没有真机跑过。
-- 风险：心跳若不生效，服务端永远认为没人在线，资源包重打包的「让路」机制失效（会在玩家手上换文件）。
-- 要做：出验收清单（`docs/acceptance-android.md`）、加日志埋点、按用户回传日志定位。
-- 判据：真机在线游玩 5 分钟后，服务端 `online/status` 的 `active > 0`；退出后 120 s 内归零。
+### B-01 安卓在线形态真机验证（埋点与清单已完成，等真机）
+- 现状：`OnlineSessionHeartbeat` 现在每次 enter/leave 都写结构化日志
+  （`game.heartbeat / heartbeat_sent|heartbeat_failed`，含 `statusCode`、`durationMs`、
+  `phase`）；401/403 会停止心跳、写 `online_token_rejected` 并带
+  `tokenRejected` 原因退回启动器；`GameActivity` 补了 paused/resumed/stopped 生命周期日志。
+- 已完成：`docs/acceptance-android.md` 验收清单。
+- 剩余：真机跑一遍（用户执行）。判据不变：在线游玩 5 分钟后服务端 `online/status`
+  的 `active > 0`；退出后 120 s 内归零。
+- 断言：`tool/check_game_host_contract.dart` 的 `GameActivity 心跳回调里上报令牌失效` /
+  `在线令牌失效时使用 TOKEN_REJECTED`。
 
-### B-02 资源包管理 UI 双端不一致
-- 现象：安装列表/切换/删除/改路径/迁移在两端的文案、按钮可用性、失败提示不完全一致。
-- 风险：用户误操作删掉正在用的资源；或迁移时没被门禁拦住。
-- 要做：对齐文案与状态反馈；确认四个门禁在所有入口都检查（见 `01-architecture.md` 第 6 节）。
-- 判据：新增 UI 级断言（Dart 可测的部分）+ 手工清单覆盖每个入口。
+### B-02 资源包管理 UI 双端一致性（门禁已补，等真机复核）
+- 事实核对（2026-10-25）：本版本**没有**「多包安装列表 / 手动切换 / 删除某个包」的 UI，
+  导入即「安装 + 校验 + 原子切换」，旧槽自动清理。因此不存在「误删正在用的包」的入口；
+  原条目描述的删除按钮并不存在，是文档与实现的偏差，不是缺失功能。
+- 已修：迁移与切形态原先只查四个内存门禁，不查持久化事务状态。崩溃恢复窗口
+  （`manifest.transactionState` 停在 extracting/validating/readyToActivate）里仍可迁移，
+  会把半成品槽整体搬走。现在 `resourceTransactionBusy()` 统一判定，
+  迁移/切形态/导入三处都查。
+- 剩余：真机按 `docs/acceptance-android.md` 第 4 节走一遍「迁移中/导入中」互斥。
+- 断言：`tool/check_storage_migration.dart` 的「事务状态 <state> 的忙判定」7 条
+  （覆盖全部 `TransactionState` 枚举值）。
 
-### B-03 安卓 SAF 目录授权只做了候选目录
-- 现象：`FilePicker.getDirectoryPath` 在安卓会返回 `content://`，已改为「应用外部目录 + 各外置卷」候选列表。
-- 剩余风险：非标准路径（U 盘、部分厂商的二级目录）用户只能手填；手填错会被校验拦住但体验一般。
-- 可选方案：接 SAF 持久化授权（`takePersistableUriPermission`）+ DocumentFile 读写封装。
-- 注意：改动面大，先评估收益；若做，必须保证迁移/校验/导入三条路径都能用新抽象。
+### B-03 安卓 SAF 目录授权只做了候选目录（待决策，未动）
+- 现状：`FilePicker.getDirectoryPath` 在安卓返回 `content://`，已改为候选目录 + 手填。
+- 为什么没做：接 SAF 持久化授权要同时改造「迁移 / 校验 / 导入」三条路径，改动面大；
+  当前候选列表已覆盖主流的应用外部目录与外置卷，收益不足以在本轮承担回归风险。
+- 需要：用户拍板是否值得为 U 盘/厂商二级目录做 SAF 抽象。
 
-### B-04 令牌对游戏 JS 可见
-- 现象：注入的桥脚本里带设备令牌，游戏页面的 JS 能读到。
-- 风险：恶意资源包（用户导入第三方资源）可窃取令牌。
-- 可选方案：native 代理层（WebView 侧不暴露令牌，改由原生带 Bearer 抓取）。成本高。
-- 现状缓解：令牌可在存档页吊销；每用户最多 10 个。
+### B-04 令牌对游戏 JS 可见（待决策，未动）
+- 现状：注入的存档桥里带设备令牌，游戏页面 JS 可读 → 恶意第三方资源包可窃取。
+- 为什么没做：彻底修需要在原生/桌面本地服务器做「请求级 Bearer 注入」，同时把令牌
+  从桥脚本里拿掉。安卓在线形态已有代理层可复用，但本地形态（Android 直读文件、
+  Windows `LocalResourceServer`）要各做一套，且要处理 CORS 与 Origin 白名单。
+- 现状缓解：令牌可在存档页吊销、每用户最多 10 个；验收清单已提示不要导入来路不明的包。
+- 需要：用户拍板是否接受「成本高、收益是防第三方资源包」的取舍。
 
 ## P1
 
 ### B-05 历史存档保留 1000 → 300 未决
 - 需要产品决策（删旧版本不可逆），**等用户拍板**，agent 不要自行改。
 
-### B-06 管理页 5 s 轮询没有 `visibilitychange`
-- 现象：后台标签页仍在轮询，浪费请求。
-- 做法：`document.addEventListener('visibilitychange', ...)` 暂停/恢复。
-
-### B-07 设备标识历史数据缺失
-- 现象：93 个历史存档版本「设备未知」（早期没记 `device` 字段）。
-- 做法：展示层对缺失做兼容（显示「历史设备」），不回填。
-
 ### B-08 Windows 自更新缺失
 - 现状：安卓有「检查更新→下载 APK→触发安装」；Windows 只能手动替换。
 - 可选：下载 zip → 退出后由外部脚本替换（需要独立 updater 进程），复杂度中等。
-
-### B-09 `.ps1` 编码陷阱没有自动化
-- 现象：PowerShell 5.1 读无 BOM 的中文注释会崩。
-- 做法：`tools/build-windows.ps1` 提交时保证 `utf-8-sig` + CRLF；可加一条 pre-commit 检查。
+- 本轮未做：需要独立的 updater 可执行文件与签名校验，超出「UI 收口」范围。
 
 ## P2
 
@@ -80,5 +82,23 @@
 
 ## 已关闭
 
-（示例格式）
 `B-00 Windows 本地 ZIP 导入不可用 → 自写 StreamingZip（`tool/check_desktop_zip.dart` 11 项 + `stress_real_pack`）`
+
+`B-06 管理页 5 s 轮询没有 visibilitychange → 后台标签页停止轮询、切回立即补一次刷新
+（`tools/test-cloud-saves.sh` 的 `管理页后台标签页暂停轮询`）`
+
+`B-07 设备标识历史数据缺失 → 缺 device 字段显示「历史设备（未记录）」，不回填
+（`tools/test-cloud-saves.sh` 的 `早期无 device 字段的存档显示为历史设备`）`
+
+`B-09 .ps1 编码陷阱没有自动化 → tools/handoff.sh verify 增加「build-windows.ps1
+为 UTF-8 BOM + CRLF」断言（`Windows 构建脚本编码` 一节）`
+
+`B-16 存档 API 连接污染导致偶发 501（2026-10-25 新发现）→ do_POST 先鉴权后读体，
+未授权请求的 body 残留在 keep-alive 连接里，被 http.server 当成下一个请求行
+（`501 Unsupported method ('{"id":...}GET')`）；修复为先读完 body 再鉴权，超限时读完丢弃并
+关闭连接。断言：`tools/test-cloud-saves.sh` 的 `未授权 POST 不污染 keep-alive 连接`；
+注意该断言在服务端容器重新部署前会保持失败（源码已修，部署归 Hermes）。`
+
+`B-17 check_desktop_zip 的 fixture 说明与实现不符（2026-10-25 新发现）→ 按文档「任意
+带嵌套目录的 ZIP」生成的包会让套件在 `big.length()` 处抛 PathNotFoundException；
+已把精确 fixture（3 条目 + 3 MiB assets/big.bin + 越界条目）写进 docs/06-testing.md。`

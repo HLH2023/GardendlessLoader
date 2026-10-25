@@ -213,4 +213,7 @@ enum class GameExitReason(val wireName: String) {
     RENDERER_GONE("rendererGone"),
     LAUNCH_FAILED("launchFailed"),
     SYSTEM_TERMINATED("systemTerminated"),
+
+    /** 在线令牌被服务端拒绝：Dart 侧收到后清登录态并提示重新登录。 */
+    TOKEN_REJECTED("tokenRejected"),
 }

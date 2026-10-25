@@ -68,8 +68,15 @@ APP_SYNC_OUT_DIR=/tmp/pvz-static python3 tools/make-app-sync.py
 # 目录 root 所有 → 用 nsenter 以宿主 root 落地
 docker run --rm --privileged --pid=host --net=host --entrypoint nsenter python:3.13-alpine \
   -t 1 -m -u -i -n -p -- sh -c "cp -f /tmp/pvz-static/* /var/www/pvzge-save/ && chown root:root /var/www/pvzge-save/*"
-md5sum save-api/sync.js /tmp/pvz-static/app-sync.js   # 必须一致
+# app-sync.js = SHIM + sync.js（生成器会插入 Bearer 改写层），两者 md5 本来就不同；
+# 正确的核对方式：生成器不报错 + 体积 = shim + sync，且浏览器版与源文件一致
+md5sum save-api/sync.js /var/www/pvzge-save/sync.js      # 必须一致（浏览器版）
+grep -c 'pvzBridgeUrl' /var/www/pvzge-save/app-admin.html  # 必须 ≥1（App 版管理页）
 ```
+
+> 2026-10-25 修正：旧文档写 `md5sum save-api/sync.js /tmp/pvz-static/app-sync.js`
+> 「必须一致」是错的——`app-sync.js` 由 SHIM（Bearer 改写层）+ `sync.js` 拼成，
+> 体积与哈希必然不同。照旧文档核对会误判成部署失败。
 
 ## 6. 资源包
 

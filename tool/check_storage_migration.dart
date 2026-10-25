@@ -9,6 +9,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'package:gardendless_loader/src/models.dart';
 import 'package:gardendless_loader/src/services/storage_migration.dart';
 import 'package:gardendless_loader/src/services/storage_root_locator.dart';
 
@@ -262,6 +263,15 @@ Future<void> main() async {
         missingTarget != null && missingTarget.restoredEntries.isEmpty);
     check('数据仍在源目录',
         await File(p.join(jrSource.path, 'manifest.json')).exists());
+
+    // 13) 持久化事务门禁：崩溃恢复窗口必须算「忙」，否则迁移会把
+    // 半成品槽整体搬走。枚举新增状态时会在这里暴露出来。
+    for (final state in TransactionState.values) {
+      final expected = state != TransactionState.idle &&
+          state != TransactionState.cleaningOldSlot;
+      check('事务状态 ${state.name} 的忙判定',
+          resourceTransactionBusy(state) == expected, expected);
+    }
 
   } finally {
     await temp.delete(recursive: true);

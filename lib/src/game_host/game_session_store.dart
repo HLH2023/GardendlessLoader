@@ -1,64 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'game_exit_result.dart';
 import 'game_host.dart';
 
-enum GameExitReason {
-  normal,
-  userReturned,
-  rendererGone,
-  launchFailed,
-  systemTerminated;
-
-  static GameExitReason fromWireName(Object? value) {
-    return GameExitReason.values.firstWhere(
-      (reason) => reason.name == value,
-      orElse: () => throw FormatException('Unknown game exit reason: $value'),
-    );
-  }
-}
-
-class GameExitResult {
-  const GameExitResult({
-    required this.sessionId,
-    required this.reason,
-    required this.finishedAt,
-    this.message,
-    this.code,
-    this.playedMs = 0,
-  });
-
-  factory GameExitResult.fromJson(Map<String, Object?> json) {
-    if (json['schemaVersion'] != 1) {
-      throw const FormatException('Unsupported game exit result schema');
-    }
-    final sessionId = json['sessionId'];
-    final finishedAt = DateTime.tryParse(json['finishedAt'] as String? ?? '');
-    if (sessionId is! String || sessionId.isEmpty || finishedAt == null) {
-      throw const FormatException('Invalid game exit result');
-    }
-    return GameExitResult(
-      sessionId: sessionId,
-      reason: GameExitReason.fromWireName(json['reason']),
-      finishedAt: finishedAt.toUtc(),
-      message: json['message'] as String?,
-      code: json['code'] as String?,
-      playedMs: (json['playedMs'] as num?)?.toInt() ?? 0,
-    );
-  }
-
-  final String sessionId;
-  final GameExitReason reason;
-  final DateTime finishedAt;
-  final String? message;
-
-  /// Error code naming a known launch failure cause; absent for other exits.
-  final String? code;
-
-  /// Time the game spent in the foreground; time in the background is not
-  /// play time.
-  final int playedMs;
-}
+export 'game_exit_result.dart';
 
 class GameSessionStore {
   GameSessionStore(this.root);

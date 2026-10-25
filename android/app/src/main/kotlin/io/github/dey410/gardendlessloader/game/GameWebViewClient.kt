@@ -16,6 +16,7 @@ class GameWebViewClient(
     private val session: NativeGameSession,
     documentStartScript: String,
     private val onRendererGone: (Boolean) -> Unit,
+    private val onTokenRejected: (() -> Unit)? = null,
 ) : WebViewClient() {
     // 本地形态：从资源槽读文件并内联 document-start 脚本。
     // 在线形态：没有本地资源，改为带 Bearer 令牌去服务器取，并把存档桥
@@ -51,6 +52,9 @@ class GameWebViewClient(
         }
     private val origin = Uri.parse(session.origin)
     private val allowedRemoteHosts = session.allowedRemoteHosts
+    // shouldInterceptRequest 在 WebView 的 IO 线程被并发调用：只上报一次即可，
+    // 否则首屏几十个子资源会触发几十次退登。
+    private var tokenRejectionNotified = false
 
     override fun shouldInterceptRequest(
         view: WebView,
@@ -76,6 +80,12 @@ class GameWebViewClient(
                     gameSessionId = session.sessionId,
                     context = mapOf("path" to url.path, "statusCode" to response.statusCode),
                 )
+                // 资源代理是 401 的第一现场（心跳 60s 才一次）。令牌失效后
+                // 在线资源全部拿不到，继续留在游戏里只会白屏。
+                if (response.statusCode == 401 && !tokenRejectionNotified) {
+                    tokenRejectionNotified = true
+                    onTokenRejected?.invoke()
+                }
             }
             return WebResourceResponse(
                 response.mimeType,

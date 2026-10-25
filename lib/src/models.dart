@@ -24,6 +24,25 @@ enum TransactionState {
   migrating,
 }
 
+/// 持久化事务是否仍在进行（崩溃恢复窗口算「忙」）。
+///
+/// 为什么不能只看内存门禁：进程被杀/断电后 `isImporting` 是 false，但
+/// manifest 里的事务状态还停在 extracting/validating/readyToActivate。
+/// 这时放行迁移或切形态，会把「搬了一半」的槽当成品用。
+///
+/// `cleaningOldSlot` 不算忙：新槽已经激活可用，只是旧槽清理推迟到下次启动。
+bool resourceTransactionBusy(TransactionState state) {
+  return switch (state) {
+    TransactionState.idle || TransactionState.cleaningOldSlot => false,
+    TransactionState.extracting ||
+    TransactionState.validating ||
+    TransactionState.selfChecking ||
+    TransactionState.readyToActivate ||
+    TransactionState.migrating =>
+      true,
+  };
+}
+
 enum ImportPhase {
   idle,
   receiving,

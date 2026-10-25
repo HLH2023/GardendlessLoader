@@ -114,10 +114,10 @@ print('OK', len(rs), '条回执字段完整')
     "$H" "$ROOT/AGENTS.md" "$ROOT/tools/handoff.sh" 2>/dev/null | grep -v '工具变量名\|变量名\|环境变量\|占位' || true)
   if [ -z "$hits" ]; then ok "未发现服务器地址/令牌字面量"; else bad "发现敏感字面量："; printf '%s\n' "$hits" | head -10; fi
 
-  sec "源码敏感扫描（lib/tool/android/.github/pubspec）"
+  sec "源码敏感扫描（lib/tool/android/.github/pubspec/docs）"
   local src_hits
   src_hits=$(cd "$ROOT" && grep -rnE 'greatbox\.top|pvz_[A-Za-z0-9]{8,}|Bearer [A-Za-z0-9._-]{12,}' \
-    lib tool android .github pubspec.yaml 2>/dev/null | grep -v '<server>' || true)
+    lib tool android .github pubspec.yaml docs README.md 2>/dev/null | grep -v '<server>' || true)
   if [ -z "$src_hits" ]; then ok "源码与配置未出现服务器地址/令牌"; else bad "源码里有字面量："; printf '%s\n' "$src_hits" | head -5; fi
 
   sec "AGENTS.md 只放持久信息"
@@ -126,6 +126,29 @@ print('OK', len(rs), '条回执字段完整')
     "$ROOT/AGENTS.md" 2>/dev/null || true)
   if [ -z "$volatile" ]; then ok "未出现版本号/任务号/测试数字/哈希等易变事实"
   else bad "AGENTS.md 里混入了易变事实（应改为「怎么查」）："; printf '%s\n' "$volatile" | head -5; fi
+
+  sec "Windows 构建脚本编码"
+  # PowerShell 5.1 读无 BOM 的中文注释会按 ANSI 解码，直接语法报错；
+  # 这几个坑只在 Windows 构建机上暴露，所以把编码固化成仓库侧断言。
+  local ps1="$ROOT/tools/build-windows.ps1"
+  if [ -f "$ps1" ]; then
+    local enc
+    enc=$(python3 - "$ps1" <<'PY'
+import sys
+d = open(sys.argv[1], 'rb').read()
+bom = d[:3] == b'\xef\xbb\xbf'
+crlf = d.count(b'\r\n')
+lf_only = d.count(b'\n') - crlf
+print(('bom-ok' if bom else 'bom-missing') + ' crlf=' + str(crlf) + ' lf_only=' + str(lf_only))
+PY
+)
+    case "$enc" in
+      bom-ok*'lf_only=0') ok "build-windows.ps1 为 UTF-8 BOM + CRLF（$enc）";;
+      *) bad "build-windows.ps1 编码不合格（$enc），Windows 构建会报语法错误";;
+    esac
+  else
+    warn "未找到 tools/build-windows.ps1，跳过"
+  fi
 
   sec "短提示词长度"
   local lines; lines=$(grep -cve '^$' "$H/prompts/01-start.md" 2>/dev/null || echo 99)
