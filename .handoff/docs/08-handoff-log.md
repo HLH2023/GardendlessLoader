@@ -275,3 +275,34 @@
 > **149 项通过 / 4 项失败 / 9 项跳过（1 个 SKIP 块）**；162 是设计总数，
 > 部署后 cloud-saves 补齐 9 条即为 162/0。回执里的 `tests` 字段已按
 > `321 通过 + 4 失败 + 9 跳过 = 334` 对齐。
+
+## R-20261025-01（部署与发布）/ orchestrator(opencode) / 2026-10-25T14:55+08:00
+
+- status: review
+- 版本: `0.9.0-hlh.18+90018`（已部署、已发布）
+- 测试: 334 项全绿（162 服务端 + 172 客户端），`cloud-saves` 由 54/4/1skip 转为 **67 / 0 / 0**
+- Release: https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.18
+
+### 执行了什么
+1. **部署存档 API**：`deploy-save-api.sh` 重建 `pvzge-save`，healthz / `/load` / `/save` 冒烟通过；
+   容器内 `HISTORY_KEEP=300`，`/app/server.py` 与源文件 md5 一致（`8e98a186…`）。
+2. **落地注入脚本**：重新生成 `app-sync.js` / `app-ui.js` / `app-admin.html` 并用 nsenter 写入
+   `/var/www/pvzge-save/`，三份文件与生成件 md5 全部一致。
+3. **全量服务端回归**：`test-cloud-saves.sh` 67/0，会话令牌 9 条断言首次真正跑起来并通过。
+4. **发布更新通道**：
+   - Windows：`publish-windows.sh` → `/var/www/pvzge-res/win/` + `manifest.json`；
+   - APK：`publish-apk.sh` → `/var/www/pvzge-res/apk/` + `manifest.json`；
+   - 带 Bearer 实测两个清单 200、latest=90018、size/sha 与磁盘一致、zip 下载 200。
+5. **创建 Release**：GitHub API 创建 `v0.9.0-hlh.18`（201），上传两个资产（各 201），
+   查询结果为 2 个 `uploaded`，大小与本地一致。
+6. **推送服务端仓库**：`pvzge/main` 已更新（会话令牌、历史 300、发布脚本、测试）。
+7. **更新 HANDOFF**：第 2 节到 hlh.18、能力矩阵与基线；第 4 节验收项全部勾选。
+
+### 数字更正与说明
+- 上一轮提交正文的「158 项绿」已在上一条日志更正为 149；本轮部署后服务端 162 项全绿。
+- APK 浏览器下载路径最终 200（authentik 登录页），`/version.json` 200。
+
+### 仍未闭环（非 Hermes）
+- 安卓真机点击：用户执行，清单在 `docs/acceptance-android.md`。
+- Windows 真实安装目录的「退出并自动更新」：首次执行时观察（失败会回滚并重启）。
+- 公开仓历史域名清理（B-15）：需要用户决定是否 force-push。
