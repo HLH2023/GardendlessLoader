@@ -214,12 +214,37 @@ class AppStrings {
   String get currentVersion => _t('当前版本', 'Current');
   String get buildNumber => _t('构建号', 'Build');
   String get latestVersion => _t('最新版本', 'Latest');
+  String get upstreamLatest => _t('上游最新', 'Upstream');
+  String get upstreamOnPar => _t('与上游同基线', 'Matches upstream');
+  String get upstreamNewer => _t('上游有新版本', 'Upstream is newer');
+  String get personalBuildTag => _t('个人构建', 'Personal build');
+  String get personalBuildNotice => _t(
+        '这是个人定制构建，版本号带 -hlh.N 后缀，与上游官方版区分。'
+        '升级请用下方「应用内更新」，它只认个人构建的发布记录；'
+        '「上游最新」仅用于对照上游官方基线。',
+        'This is a personal build: the -hlh.N suffix separates it from the '
+            'upstream release. Upgrade through "In-app update" below, which '
+            'tracks personal builds only; "Upstream" is shown purely as a '
+            'baseline for comparison.',
+      );
+  String get upstreamSignatureWarning => _t(
+        '上游官方包与本构建签名不同，不能直接覆盖安装（需先卸载，且会丢掉云存档登录状态）。',
+        'The upstream APK is signed with a different key, so it cannot be '
+            'installed over this build without uninstalling first (which '
+            'drops the cloud-save sign-in).',
+      );
   String get autoCheckHint => _t(
         '进入启动器时会自动检查，也可以点右上角的刷新图标手动检查。',
         'Checked automatically when the launcher opens; tap the refresh icon '
             'at the top right to check now.',
       );
   String get cloudDriveUpdate => _t('网盘更新', 'Update from cloud drive');
+  String get saveManager => _t('存档管理', 'Save manager');
+  String get saveManagerHint => _t(
+        '云存档的历史版本、回滚与设备列表在服务器的管理页里，需在浏览器中打开（沿用同一 authentik 账号）。',
+        'Save history, rollback and the device list live on the server\'s '
+            'manager page; open it in a browser with the same authentik account.',
+      );
   String get viewGithubRelease => _t('查看 GitHub Release', 'GitHub release');
 
   // Settings page: in-app APK update.
@@ -377,6 +402,8 @@ class AppStrings {
             'bottom left of the game to return to the loader',
       );
   String get autoCollectSun => _t('自动收集', 'Auto Collect Sun');
+  String get autoCollectSunNeedsResource =>
+      _t('导入可用资源后生效', 'applies once a resource is imported');
   String get autoCollectSunSubtitle => _t(
         '游戏中约每 3 秒模拟一次 A 键，暂停、后台或输入时不触发',
         'Presses A about every 3 seconds in play; skipped while paused, in '

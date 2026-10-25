@@ -809,7 +809,7 @@ class _TopBar extends StatelessWidget {
             // top bar only carries the loader's own version.
             if (constraints.maxWidth >= 520) ...[
               Text(
-                context.strings.loaderVersion(controller.currentAppVersion),
+                context.strings.loaderVersion(controller.installedVersionName),
                 key: const ValueKey('app-version-pill'),
                 style: TextStyle(color: palette.inkMuted, fontSize: 12.5),
               ),

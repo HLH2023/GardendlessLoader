@@ -25,6 +25,7 @@ const kDefaultServerBase = String.fromEnvironment(
 const saveServerRequestTimeout = Duration(seconds: 20); // 服务器请求（清单、注入脚本）超时时间
 const saveLoginPagePath = '/_save/app.html'; // 令牌签发页；浏览器打开时是手动复制模式
 const saveLoginBridgeQuery = 'bridge=1'; // 应用内登录：页面通过 GardendlessBridge 回传令牌
+const saveAdminPagePath = '/_save/admin.html'; // 完整存档管理页（历史/回滚/设备），需浏览器 authentik 会话
 const saveWhoamiPath = '/_save/app/whoami'; // 校验设备令牌，返回 {"user": "..."}
 const saveApkManifestPath =
     '/_save/app/res/apk/manifest.json'; // 应用内更新的 APK 清单，带 Bearer 令牌请求

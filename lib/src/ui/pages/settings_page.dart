@@ -59,18 +59,21 @@ class _LoaderPanel extends StatelessWidget {
     final palette = context.garden;
     final strings = context.strings;
     final update = controller.availableUpdate;
+    // 这张卡片只反映上游官方主线；个人构建的升级走下方「应用内更新」。
     final (String status, Color? statusColor) = update != null
-        ? (strings.updateAvailable, palette.accent)
+        ? (strings.upstreamNewer, palette.accent)
         : controller.updateCheckInProgress
             ? (strings.checking, null)
-            : (strings.noUpdate, null);
+            : controller.latestAppVersion == null
+                ? (strings.noUpdate, null)
+                : (strings.upstreamOnPar, null);
     return SurfaceCard(
       key: update == null ? null : const ValueKey('app-update-entry'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           PanelHeader(
-            title: appDisplayName,
+            title: '$appDisplayName · ${strings.personalBuildTag}',
             trailing: StatusLabel(label: status, color: statusColor),
           ),
           const SizedBox(height: 16),
@@ -81,7 +84,7 @@ class _LoaderPanel extends StatelessWidget {
                 value: 'v${controller.installedVersionName}',
               ),
               Metric(
-                label: strings.latestVersion,
+                label: strings.upstreamLatest,
                 value: controller.latestAppVersion == null
                     ? '--'
                     : 'v${controller.latestAppVersion}',
@@ -96,7 +99,27 @@ class _LoaderPanel extends StatelessWidget {
                 : controller.installedBuildNumber,
             mono: true,
           ),
+          const SizedBox(height: 12),
+          Text(
+            strings.personalBuildNotice,
+            style: TextStyle(color: palette.inkMuted, fontSize: 12.5, height: 1.5),
+          ),
           const SizedBox(height: 14),
+          if (controller.cloudServerConfigured) ...[
+            Text(
+              strings.saveManagerHint,
+              style: TextStyle(color: palette.inkMuted, fontSize: 12.5, height: 1.5),
+            ),
+            const SizedBox(height: 8),
+            GardenButton(
+              label: strings.saveManager,
+              icon: Icons.cloud_sync_outlined,
+              tone: GardenButtonTone.ghost,
+              compact: true,
+              onPressed: () => actions.openUrl(controller.saveAdminUrl),
+            ),
+            const SizedBox(height: 14),
+          ],
           if (update == null)
             Text(
               strings.autoCheckHint,
@@ -110,6 +133,11 @@ class _LoaderPanel extends StatelessWidget {
             Text(
               '${update.currentVersion} → ${update.latestVersion}',
               style: TextStyle(color: palette.inkMuted, fontSize: 12.5),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              strings.upstreamSignatureWarning,
+              style: TextStyle(color: palette.danger, fontSize: 12.5, height: 1.5),
             ),
             if (update.releaseName.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -457,9 +485,12 @@ class _LaunchPreferences extends StatelessWidget {
             key: const ValueKey('home-auto-collect-sun'),
             switchKey: const ValueKey('home-auto-collect-sun-switch'),
             title: strings.autoCollectSun,
-            subtitle: strings.autoCollectSunSubtitle,
+            subtitle: controller.hasCurrentResource
+                ? strings.autoCollectSunSubtitle
+                : '${strings.autoCollectSunSubtitle}'
+                    '（${strings.autoCollectSunNeedsResource}）',
             value: controller.autoCollectSunEnabled,
-            onChanged: controller.hasCurrentResource
+            onChanged: controller.initialized
                 ? controller.setAutoCollectSunEnabled
                 : null,
           ),

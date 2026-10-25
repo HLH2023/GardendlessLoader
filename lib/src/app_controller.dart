@@ -216,6 +216,14 @@ class AppController extends ChangeNotifier {
     return base.isEmpty ? '' : '$base$saveLoginPagePath?$saveLoginBridgeQuery';
   }
 
+  /// The full save manager (history, rollback, devices, tokens) that already
+  /// exists on the server; it needs the browser's authentik session, so the
+  /// app hands it to the system browser instead of embedding a second UI.
+  String get saveAdminUrl {
+    final base = _appSettings.effectiveServerBaseUrl;
+    return base.isEmpty ? '' : '$base$saveAdminPagePath';
+  }
+
   CloudLoginStatus get cloudLogin => _cloudLogin;
   bool get cloudLoginInProgress => _cloudLogin.inProgress;
 
