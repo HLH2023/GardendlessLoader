@@ -18,6 +18,13 @@ dependencies:
   path: ^1.9.0
   path_provider: ^2.1.5
   wakelock_plus: ^1.4.0
+  # 选择资源存储目录（双端：Android 走 SAF 目录选择，Windows 走原生对话框）
+  file_picker: ^13.2.0
+  # 仅 Windows 用：自带 CEF(Chromium) 内核的游戏窗口。
+  # 选它而不是 WebView2 系的原因：WebView2 的两个 Flutter 包分别锁死
+  # Dart>=3.12 / sdk<3.0，与当前 Flutter 3.41.9(Dart 3.11.5) 都冲突；
+  # CEF 自带内核，也不依赖用户机器上的 Edge 版本。
+  webview_cef: ^0.6.2
 
 dev_dependencies:
   flutter_lints: ^5.0.0

@@ -3,6 +3,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 import '../../app_controller.dart';
 import '../../l10n/app_strings.dart';
+import 'storage_location_card.dart';
 import '../../logging/log_event_catalog.dart';
 import '../../models.dart';
 import '../../services/garden_journal.dart';
@@ -45,6 +46,8 @@ class ResourcesPage extends StatelessWidget {
           actions: actions,
           detailsExpanded: detailsExpanded,
         ),
+        const SizedBox(height: 16),
+        StorageLocationCard(controller: controller),
       ],
     );
   }

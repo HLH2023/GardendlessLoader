@@ -63,6 +63,65 @@ class AppStrings {
 
   String _t(String zh, String en) => isChinese ? zh : en;
 
+  // 游玩形态 / 全局登录
+  String get playModeTitle => _t('游玩形态', 'Play mode');
+  String get playModeLocal => _t('本地（离线）', 'Local (offline)');
+  String get playModeOnline => _t('在线', 'Online');
+  String get playModeLocalHint => _t(
+        '使用已下载的资源包，不联网也能玩；有网时存档照常同步。',
+        'Plays the downloaded resource pack, works without a network; saves still sync when online.',
+      );
+  String get playModeOnlineHint => _t(
+        '不下载资源包，由启动器反代服务器上的游戏页；需要联网。',
+        'No local resource pack: the launcher proxies the game straight from the server. Requires a network.',
+      );
+  String get playModeLocalNeedsResource =>
+      _t('本地游玩需要先下载/导入资源包', 'Local play needs a resource pack first');
+  String get playModeOnlineNeedsServer =>
+      _t('在线游玩需要先配置服务器地址', 'Online play needs a server address');
+  String get playModeDesktopOnly =>
+      _t('在线游玩目前仅桌面端可用', 'Online play is currently desktop only');
+  String get cloudSavesOffHint =>
+      _t('未登录：本次游戏不会同步存档', 'Not signed in: this session will not sync saves');
+  String get accountTitle => _t('账号', 'Account');
+  String get accountSignedInAs => _t('已登录', 'Signed in as');
+  String get accountSignedOut => _t('未登录', 'Not signed in');
+  String get accountSignIn => _t('登录', 'Sign in');
+  String get accountReSignIn => _t('重新登录', 'Sign in again');
+  String get accountSignOut => _t('退出登录', 'Sign out');
+  String get accountSignedOutDone => _t('已退出登录', 'Signed out');
+  String get accountSignedInFallback => _t('已登录设备', 'Signed-in device');
+  String get accountHint => _t(
+        '登录后，云存档、资源下载、在线游玩与存档管理共用同一身份。',
+        'One sign-in covers cloud saves, resource downloads, online play and save management.',
+      );
+
+  // 资源存储位置（Android + 桌面端通用）
+  String get storageTitle => _t('资源存储位置', 'Resource storage');
+  String get storageFromCustom => _t('自定义位置', 'Custom location');
+  String get storageFromDefault => _t('默认位置', 'Default location');
+  String get storageChange => _t('更改位置', 'Change location');
+  String get storageRestoreDefault => _t('恢复默认', 'Use default');
+  String get storageRefresh => _t('刷新占用', 'Refresh usage');
+  String get storageMigrating => _t('正在迁移资源…', 'Migrating resources…');
+  String get storagePickFolder => _t('选择目录…', 'Choose folder…');
+  String get storageDialogTitle => _t('选择资源存储位置', 'Choose resource storage');
+  String get storageDialogBody => _t(
+        '会把这个目录里的资源包原样搬到新位置，完成后自动生效。迁移失败会自动回滚，原位置仍然可用。',
+        'The resource package is moved to the new location and applied right away. A failed '
+            'migration rolls back, leaving the current location intact.',
+      );
+  String get storageConfirmMigrate => _t('开始迁移', 'Migrate');
+  String get storageCancel => _t('取消', 'Cancel');
+  String get storageSwitched => _t('存储位置已切换', 'Storage location switched');
+  String get storageValidating => _t('正在校验…', 'Checking…');
+  String get storagePathHint => _t('绝对路径', 'Absolute path');
+  String storageUsageSummary(String used, int files) =>
+      _t('占用 $used · $files 个文件', 'Uses $used across $files files');
+  String storageFreeLabel(String free) => _t('剩余 $free', '$free free');
+  String get storageUsageUnknown => _t('占用未知', 'Usage unknown');
+  String get storageNotConfigured => _t('尚未初始化', 'Not initialized');
+
   // Navigation and shell.
   String get navGame => _t('游戏', 'Play');
   String get navResources => _t('资源', 'Resources');

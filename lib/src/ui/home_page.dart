@@ -13,6 +13,8 @@ import '../services/sensor_housing_service.dart';
 import '../services/shortcut_service.dart';
 import '../services/update_check_service.dart';
 import 'launcher_actions.dart';
+import 'pages/desktop_game_page.dart';
+import '../services/local_resource_server.dart';
 import 'pages/play_page.dart';
 import 'pages/logs_page.dart';
 import 'pages/resources_page.dart';
@@ -528,6 +530,29 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _startGame() async {
     final strings = context.strings;
+    // 桌面端：起本地服务器 + 进程内 WebView 窗口（两种形态共用同一通路）
+    if (_controller.isDesktopPlatform) {
+      DesktopGameLaunch launch;
+      try {
+        launch = await _controller.prepareDesktopGame();
+      } catch (error) {
+        _toast(strings.cannotStartGame('$error'), code: 'game_host_launch_failed');
+        return;
+      }
+      if (!mounted) {
+        await _controller.finishDesktopGame(launch);
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => DesktopGamePage(
+            launch: launch,
+            onClosed: () => _controller.finishDesktopGame(launch),
+          ),
+        ),
+      );
+      return;
+    }
     try {
       await _controller.startGame();
     } on PlatformException catch (error) {

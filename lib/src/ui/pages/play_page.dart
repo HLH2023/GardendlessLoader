@@ -5,6 +5,7 @@ import '../../l10n/app_strings.dart';
 import '../launcher_actions.dart';
 import '../theme/garden_theme.dart';
 import '../widgets/garden_widgets.dart';
+import 'play_mode_card.dart';
 
 class PlayPage extends StatefulWidget {
   const PlayPage({
@@ -49,9 +50,16 @@ class _PlayPageState extends State<PlayPage> {
     );
     return LayoutBuilder(
       builder: (context, constraints) {
+        final modeCard = PlayModeCard(controller: controller, actions: widget.actions);
         if (constraints.maxWidth < 560) {
           return ListView(
-            children: [hero, SizedBox(height: gap), actionBar],
+            children: [
+              hero,
+              SizedBox(height: gap),
+              actionBar,
+              SizedBox(height: gap),
+              modeCard,
+            ],
           );
         }
         // Launcher composition: the key art owns the open area, the title
@@ -68,6 +76,13 @@ class _PlayPageState extends State<PlayPage> {
                 actionBar,
               ],
             ),
+            SizedBox(height: gap),
+            // 形态切换 + 全局账号：两种形态共用同一存档通路，登录态也只有一份
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 640),
+              child: modeCard,
+            ),
+            const SizedBox(height: 8),
           ],
         );
       },

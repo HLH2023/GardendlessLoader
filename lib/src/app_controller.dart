@@ -18,6 +18,8 @@ import 'services/about_content_service.dart';
 import 'services/announcement_service.dart';
 import 'services/app_install_service.dart';
 import 'services/app_paths_service.dart';
+import 'services/local_resource_server.dart';
+import 'services/storage_root_service.dart';
 import 'services/app_settings_store.dart';
 import 'services/app_update_service.dart';
 import 'services/cloud_login_service.dart';
@@ -403,6 +405,12 @@ class AppController extends ChangeNotifier {
   String get cloudAccount => _appSettings.deviceAccount;
   bool get cloudAccountKnown => _appSettings.deviceAccount.isNotEmpty;
 
+  /// 全局登录态：启动器级别的一份身份，云存档/资源下载/在线游玩共用。
+  bool get accountSignedIn => _appSettings.hasDeviceToken;
+  String get accountDisplayName => _appSettings.deviceAccount.isNotEmpty
+      ? _appSettings.deviceAccount
+      : AppStrings.current.accountSignedInFallback;
+
   /// Whether a server address is known, with or without a token yet.
   bool get cloudServerAddressConfigured =>
       _appSettings.effectiveServerBaseUrl.isNotEmpty;
@@ -440,7 +448,123 @@ class AppController extends ChangeNotifier {
   String? get gpNextCompatibilityError =>
       _currentValidation.gpNextCompatibilityError ??
       _manifest.gpNextCompatibilityError;
-  bool get canStartGame => hasCurrentResource;
+  /// 是否桌面平台（Windows/Linux/macOS）：游戏跑在进程内 WebView + 本地服务器。
+  bool get isDesktopPlatform =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+  /// 当前游玩形态。
+  PlayMode get playMode => _appSettings.playMode;
+
+  /// 在线形态是否可用：桌面端 + 已配置服务器。
+  ///
+  /// Android 的在线形态需要改原生 GameSession（当前只支持本地资源 origin），
+  /// 因此这里先只在桌面端开放，避免给出一个点了没反应的开关。
+  bool get onlinePlaySupported =>
+      isDesktopPlatform && _appSettings.effectiveServerBaseUrl.isNotEmpty;
+
+  /// 是否具备开始游戏的条件（按形态判定）。
+  bool get canStartGame => playMode == PlayMode.online
+      ? onlinePlaySupported
+      : hasCurrentResource;
+
+  /// 退出登录：清掉设备令牌（服务器端令牌仍有效，需要时可在存档页吊销）。
+  Future<void> signOutAccount() async {
+    await _updateAppSettings(_appSettings.copyWith(deviceToken: '', deviceAccount: ''));
+    _appLogger.emit(
+      level: LogLevel.info,
+      category: 'cloud',
+      event: 'account_signed_out',
+      outcome: LogOutcome.succeeded,
+    );
+    notifyListeners();
+  }
+
+  /// 切换游玩形态（立即持久化）。
+  Future<void> setPlayMode(PlayMode mode) async {
+    if (_appSettings.playMode == mode) return;
+    await _updateAppSettings(_appSettings.copyWith(playMode: mode));
+    _appLogger.emit(
+      level: LogLevel.info,
+      category: 'game.host',
+      event: 'play_mode_changed',
+      outcome: LogOutcome.succeeded,
+      context: <String, Object?>{'mode': mode.name},
+    );
+    notifyListeners();
+  }
+
+  // ===== 存储位置（资源包根目录）=====
+  bool _storageBusy = false;
+  bool _storageFromConfigured = false;
+  StorageUsage? _storageUsage;
+
+  /// 正在迁移存储位置
+  bool get storageBusy => _storageBusy;
+
+  /// 当前资源根是否来自用户配置（而不是平台默认）
+  bool get storageFromConfigured => _storageFromConfigured;
+
+  /// 资源目录占用（字节/文件数/剩余空间）
+  StorageUsage? get storageUsage => _storageUsage;
+
+  /// 资源根绝对路径
+  String? get storageRootPath => _paths?.root.path;
+
+  /// 平台默认位置（供「恢复默认」展示）
+  Future<String> storageDefaultPath() async =>
+      (await _pathsService.defaultRoot()).path;
+
+  /// 校验候选目录是否可用作存储位置（不改状态）
+  Future<StorageCheck> checkStorageTarget(String path) {
+    final current = _paths?.root;
+    return _pathsService.storage.validate(Directory(path.trim()), currentRoot: current);
+  }
+
+  /// 刷新占用统计
+  Future<void> refreshStorageUsage() async {
+    final root = _paths?.root;
+    if (root == null) return;
+    try {
+      _storageUsage = await _pathsService.storage.usage(root);
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  /// 切换资源存储位置：搬数据 → 写指针 → 重新加载。
+  ///
+  /// 返回 null 表示成功；否则返回给用户看的错误文案。
+  /// 迁移失败时数据已自动回滚，仍从老位置正常工作。
+  Future<String?> changeStorageRoot(String path) async {
+    final current = _paths;
+    if (current == null) return '应用尚未初始化';
+    if (_storageBusy) return '正在迁移中，请稍候';
+    final target = Directory(path.trim());
+    _storageBusy = true;
+    notifyListeners();
+    try {
+      final result = await _pathsService.storage.migrate(
+        sourceRoot: current.root,
+        target: target,
+      );
+      if (!result.ok) {
+        final detail = result.rollbackErrors.isEmpty
+            ? ''
+            : '（回滚异常：${result.rollbackErrors.join('；')}）';
+        return '${result.error ?? '切换存储位置失败'}$detail';
+      }
+      _paths = await _pathsService.relocateTo(target);
+      _storageFromConfigured = true;
+      // 等价于从新位置重启：重新读取 manifest / 设置 / 日志
+      await initialize();
+      await refreshStorageUsage();
+      return null;
+    } catch (e) {
+      return '切换存储位置失败：$e';
+    } finally {
+      _storageBusy = false;
+      notifyListeners();
+    }
+  }
 
   String get detectedTitle =>
       _currentValidation.detectedTitle ??
@@ -463,7 +587,9 @@ class AppController extends ChangeNotifier {
     try {
       Future<void> initializeCore() async {
         _emitInitializationStage('paths');
-        _paths = await _pathsService.ensureInitialized();
+        final resolvedPaths = await _pathsService.ensureInitializedWithSource();
+        _paths = resolvedPaths.paths;
+        _storageFromConfigured = resolvedPaths.fromConfigured;
         _emitInitializationStage('game_session_recovery');
         _gameSessionStore = GameSessionStore(_paths!.root);
         final exitResult = await _gameSessionStore!.consumeExitResult();
@@ -1246,6 +1372,79 @@ class AppController extends ChangeNotifier {
     super.dispose();
   }
 
+  /// 桌面端准备游戏：起本地服务器（本地资源 / 反代上游），返回要加载的地址。
+  ///
+  /// 两种形态都经过 [LocalResourceServer]，页面 origin 固定是 127.0.0.1，
+  /// 存档桥（设备令牌）注入方式相同 —— 这就是「存档行为一致」的实现基础。
+  Future<DesktopGameLaunch> prepareDesktopGame() async {
+    final paths = _requirePaths();
+    _message = null;
+    final mode = playMode;
+    final base = _appSettings.effectiveServerBaseUrl;
+
+    if (mode == PlayMode.online && base.isEmpty) {
+      const failure = '还没有配置服务器地址，无法在线游玩';
+      _message = const LauncherMessage(failure, 'online_play_no_server');
+      notifyListeners();
+      throw StateError(failure);
+    }
+    Directory? resourceDirectory;
+    if (mode == PlayMode.local) {
+      if (!_currentValidation.isValid) {
+        _message = _failureMessage(
+          _currentValidation.errorCode,
+          _currentValidation.errorMessage,
+        );
+        notifyListeners();
+        throw StateError(_message!.text);
+      }
+      resourceDirectory = _importService.activeDirectory(paths, _manifest);
+      if (resourceDirectory == null) {
+        const failure = '没有可用的资源包';
+        _message = const LauncherMessage(failure, 'local_play_no_resource');
+        notifyListeners();
+        throw StateError(failure);
+      }
+    }
+
+    final bridge = await buildSaveBridgeScript();
+    final server = await LocalResourceServer.start(
+      root: resourceDirectory,
+      bridgeScript: bridge,
+      upstream: mode == PlayMode.online ? Uri.parse('$base/') : null,
+    );
+    _appLogger.emit(
+      level: LogLevel.info,
+      category: 'game.host',
+      event: 'desktop_host_started',
+      outcome: LogOutcome.succeeded,
+      context: <String, Object?>{
+        'mode': mode.name,
+        'port': server.port,
+        'cloud_saves': bridge.isNotEmpty,
+        if (mode == PlayMode.online) 'server': maskedServerBase(base),
+      },
+    );
+    return DesktopGameLaunch(
+      uri: server.baseUri,
+      server: server,
+      mode: mode == PlayMode.online ? DesktopPlayMode.online : DesktopPlayMode.local,
+      hasCloudSaves: bridge.isNotEmpty,
+    );
+  }
+
+  /// 桌面端游戏窗口关闭后收尾。
+  Future<void> finishDesktopGame(DesktopGameLaunch launch) async {
+    await launch.server.stop();
+    _appLogger.emit(
+      level: LogLevel.info,
+      category: 'game.host',
+      event: 'desktop_host_stopped',
+      outcome: LogOutcome.succeeded,
+      context: <String, Object?>{'mode': launch.mode.name},
+    );
+  }
+
   Future<void> startGame() async {
     final paths = _requirePaths();
     _message = null;
@@ -1493,7 +1692,24 @@ class AppController extends ChangeNotifier {
   /// The page posts `{token, id, base}` to `window.GardendlessBridge`; this
   /// method then proves the token with `/_save/app/whoami` before persisting
   /// it, so a half-finished authentik flow never looks like a working login.
+  bool _loginInProgress = false;
+
+  /// 登录流程进行中（按钮转圈用）。
+  bool get loginInProgress => _loginInProgress;
+
   Future<void> loginWithAuthentik() async {
+    if (_loginInProgress) return;
+    _loginInProgress = true;
+    notifyListeners();
+    try {
+      await _loginWithAuthentikImpl();
+    } finally {
+      _loginInProgress = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loginWithAuthentikImpl() async {
     if (_cloudLogin.inProgress) return;
     final base = _appSettings.effectiveServerBaseUrl;
     if (base.isEmpty) {
@@ -2375,12 +2591,35 @@ class AppController extends ChangeNotifier {
   /// the launch: the game opens without cloud saves and the log records why.
   Future<void> _prepareSaveBridge(Directory appRoot) async {
     final file = File(p.join(appRoot.path, syncBridgeFileName));
-    final base = _appSettings.effectiveServerBaseUrl;
-    final token = _appSettings.deviceToken.trim();
-    if (base.isEmpty || token.isEmpty) {
+    final content = await buildSaveBridgeScript();
+    if (content.isEmpty) {
       await _deleteFileQuietly(file);
       return;
     }
+    try {
+      await file.writeAsString(content, flush: true);
+    } catch (error, stackTrace) {
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'game.host',
+        event: 'save_bridge_write_failed',
+        outcome: LogOutcome.failed,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  /// 生成存档桥脚本（`window.__PVZGE_APP__` + shim/sync + 面板）。
+  ///
+  /// Android 把它交给原生在 document-start 内联；桌面端直接把它交给本地服务器
+  /// 注入页面（在线形态注入反代后的页面）。两条路径同一份脚本，因此
+  /// 「本地/在线」两种形态的存档语义完全一致。
+  /// 未登录或未配置服务器时返回空字符串：游戏照常启动，只是没有云存档。
+  Future<String> buildSaveBridgeScript() async {
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) return '';
     try {
       final script = await _remoteResourceService.fetchAppSyncScript(
         token: token,
@@ -2419,7 +2658,6 @@ class AppController extends ChangeNotifier {
           ..write(escapeDocumentStartScript(panel));
       }
       final content = buffer.toString();
-      await file.writeAsString(content, flush: true);
       _appLogger.emit(
         level: LogLevel.info,
         category: 'game.host',
@@ -2430,8 +2668,8 @@ class AppController extends ChangeNotifier {
           'bytes': content.length,
         },
       );
+      return content;
     } catch (error, stackTrace) {
-      await _deleteFileQuietly(file);
       _appLogger.emit(
         level: LogLevel.warn,
         category: 'game.host',
@@ -2441,6 +2679,7 @@ class AppController extends ChangeNotifier {
         error: error,
         stackTrace: stackTrace,
       );
+      return '';
     }
   }
 
