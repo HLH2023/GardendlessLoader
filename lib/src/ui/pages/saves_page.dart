@@ -128,6 +128,7 @@ class _SavesPageState extends State<SavesPage> {
                     _SaveEntryCard(
                       controller: controller,
                       entry: entry,
+                      canManage: snapshot.isAdmin,
                       expanded: _expanded.contains(entry.key),
                       onToggleHistory: () {
                         setState(() {
@@ -235,12 +236,16 @@ class _SaveEntryCard extends StatelessWidget {
   const _SaveEntryCard({
     required this.controller,
     required this.entry,
+    required this.canManage,
     required this.expanded,
     required this.onToggleHistory,
   });
 
   final AppController controller;
   final CloudSaveEntry entry;
+
+  /// 历史版本与回滚是管理员接口；非管理员点进去只会 403。
+  final bool canManage;
   final bool expanded;
   final VoidCallback onToggleHistory;
 
@@ -264,13 +269,16 @@ class _SaveEntryCard extends StatelessWidget {
           PanelHeader(
             title: strings.savesKeyLabel(entry.key),
             icon: Icons.save_outlined,
-            trailing: GardenButton(
-              label: expanded ? strings.savesHistoryHide : strings.savesHistory,
-              icon: expanded ? Icons.expand_less : Icons.history,
-              tone: GardenButtonTone.ghost,
-              compact: true,
-              onPressed: onToggleHistory,
-            ),
+            trailing: canManage
+                ? GardenButton(
+                    label:
+                        expanded ? strings.savesHistoryHide : strings.savesHistory,
+                    icon: expanded ? Icons.expand_less : Icons.history,
+                    tone: GardenButtonTone.ghost,
+                    compact: true,
+                    onPressed: onToggleHistory,
+                  )
+                : null,
           ),
           const SizedBox(height: 12),
           MetricRow(
@@ -306,7 +314,14 @@ class _SaveEntryCard extends StatelessWidget {
               ),
             ),
           ],
-          if (expanded) ...[
+          if (!canManage) ...[
+            const SizedBox(height: 8),
+            Text(
+              strings.savesHistoryForbidden,
+              style: TextStyle(color: palette.inkFaint, fontSize: 11.5, height: 1.5),
+            ),
+          ],
+          if (expanded && canManage) ...[
             const SizedBox(height: 12),
             Divider(color: palette.border),
             const SizedBox(height: 8),

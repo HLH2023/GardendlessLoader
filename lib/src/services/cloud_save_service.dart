@@ -56,6 +56,7 @@ class CloudSaveSnapshot {
     required this.user,
     required this.entries,
     required this.serverTime,
+    this.isAdmin = false,
   });
 
   factory CloudSaveSnapshot.fromJson(Map<String, Object?> json) {
@@ -93,12 +94,17 @@ class CloudSaveSnapshot {
       user: user.trim(),
       entries: entries,
       serverTime: _asInt(json['server_ts']) ?? 0,
+      isAdmin: json['is_admin'] == true,
     );
   }
 
   final String user;
   final List<CloudSaveEntry> entries;
   final int serverTime;
+
+  /// 令牌是否属于 authentik Admins 组。历史版本与回滚是管理员接口，
+  /// 非管理员看到按钮只会拿到 403，所以页面要据此隐藏。
+  final bool isAdmin;
 
   int get totalBytes => entries.fold(0, (sum, entry) => sum + entry.bytes);
 
