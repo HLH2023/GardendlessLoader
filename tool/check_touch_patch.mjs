@@ -20,6 +20,11 @@ assert.match(
   /dragCommitMinimumDelayMilliseconds = 50;/,
   'drag placement must use the accepted 50 ms minimum release delay',
 );
+assert.match(
+  touchAdapterSource,
+  /data-pvz-ui/,
+  'save panel DOM must be treated as a native touch target',
+);
 
 class TestMouseEvent extends Event {
   constructor(type, options = {}) {
@@ -1213,6 +1218,84 @@ for (const interruption of [
   assert.equal(nativeTouches, 2, 'native form controls must retain touch input');
   assert.equal(start.defaultPrevented, false);
   assert.equal(end.defaultPrevented, false);
+}
+
+{
+  // 存档面板（App 内注入的 DOM 浮层）必须按“原生控件”放行：document
+  // 捕获层一旦 preventDefault，面板里的 click 就不会合成，关闭/下载按钮
+  // 全部失效（FAB 用 pointerup，所以看起来只有它能点）。
+  const harness = createTouchHarness();
+  const mask = createElement({
+    id: 'pvz-admin-mask',
+    getAttribute: (name) => name === 'data-pvz-ui' ? '1' : null,
+  });
+  const close = createElement({ parentElement: mask, tagName: 'BUTTON' });
+  let nativeTouches = 0;
+  let canvasMouseDowns = 0;
+  harness.document.addEventListener('touchstart', () => {
+    nativeTouches += 1;
+  });
+  harness.document.addEventListener('touchend', () => {
+    nativeTouches += 1;
+  });
+  harness.canvas.addEventListener('mousedown', () => {
+    canvasMouseDowns += 1;
+  });
+  const touch = createTouch(63, close, 120, 30);
+  const start = createTouchEvent('touchstart', {
+    touches: [touch],
+    changedTouches: [touch],
+  });
+  const end = createTouchEvent('touchend', {
+    touches: [],
+    changedTouches: [touch],
+  });
+
+  harness.document.dispatchEvent(start);
+  harness.flushAnimationFrame();
+  harness.flushAnimationFrame();
+  harness.document.dispatchEvent(end);
+
+  assert.equal(
+    nativeTouches,
+    2,
+    'save panel must retain browser click synthesis',
+  );
+  assert.equal(start.defaultPrevented, false);
+  assert.equal(end.defaultPrevented, false);
+  assert.equal(
+    canvasMouseDowns,
+    0,
+    'save panel taps must not be redirected to GameCanvas',
+  );
+}
+
+{
+  // 旧版服务端注入的 ui.js 没有 data-pvz-ui 属性；按固定 id 兜底，
+  // 避免“服务端已修、APK 还是旧适配器”时面板继续不可点。
+  const harness = createTouchHarness();
+  const mask = createElement({ id: 'pvz-admin-mask' });
+  const close = createElement({ parentElement: mask, tagName: 'BUTTON' });
+  let nativeTouches = 0;
+  harness.document.addEventListener('touchstart', () => {
+    nativeTouches += 1;
+  });
+  harness.document.addEventListener('touchend', () => {
+    nativeTouches += 1;
+  });
+  const touch = createTouch(64, close, 120, 30);
+  const start = createTouchEvent('touchstart', {
+    touches: [touch],
+    changedTouches: [touch],
+  });
+  harness.document.dispatchEvent(start);
+  harness.document.dispatchEvent(createTouchEvent('touchend', {
+    touches: [],
+    changedTouches: [touch],
+  }));
+
+  assert.equal(nativeTouches, 2, 'legacy save panel id must retain touch input');
+  assert.equal(start.defaultPrevented, false);
 }
 
 {

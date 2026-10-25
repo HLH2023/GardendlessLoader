@@ -1,13 +1,13 @@
 # 06 测试
 
-## 1. 基线：364 项（服务端 173 + 客户端 191）
+## 1. 基线：392 项（服务端 201 + 客户端 191）
 
 ```bash
-# 服务端（173 项）—— 在 /home/hlh/pvzge 下跑
-bash  tools/test-cloud-saves.sh      # 78  云端存档全链路（含吊销、鉴权边界、连接复用、会话令牌、自助面板）
+# 服务端（201 项）—— 在 /home/hlh/pvzge 下跑
+bash  tools/test-cloud-saves.sh      # 97  云端存档全链路（含吊销、鉴权边界、连接复用、会话令牌、自助面板、静态部署漂移）
 python3 tools/test-concurrency.py    # 19  并发写/锁/乐观版本号
-bash  tools/test-save-versions.sh    # 35  版本隔离 + 向下兼容迁移 + 回滚 + 历史保留策略
-node  tools/test-sync-offline.js     # 41  客户端 sync.js 沙盒（冲突/退避/401/回滚）
+bash  tools/test-save-versions.sh    # 41  版本隔离 + 向下兼容迁移 + 回滚 + 历史保留策略
+node  tools/test-sync-offline.js     # 44  客户端 sync.js 沙盒（冲突/退避/401/回滚/Web 版本兜底）
 
 # 客户端（191 项）—— 在仓库根目录跑
 dart run tool/check_local_server.dart          # 43  本地服务器（注入/Range/穿越/软链/并发）
@@ -73,3 +73,10 @@ dart run tool/stress_real_pack.dart /var/www/pvzge-res/pvzge-res-<ver>.zip /tmp/
 
 安卓端真机验收清单见 `docs/acceptance-android.md`；
 上游的手工清单在 `docs/acceptance-checklist.md`（**不要改动上游文件**）。
+
+7. **2026-10-25 修复的假阳性**：`printf '%s' "$VAR" | grep -q ...` 在 `set -o pipefail`
+   下会因 `grep -q` 提前退出、`printf` 收到 SIGPIPE 而随机失败（实测 200 次里 186 次）。
+   断言统一改成 `grep -q ... <<<"$VAR"` 或先落变量再 grep；新增断言不要再写管道形式。
+8. **静态文件漂移**：Web 面板的 `ui.js/admin.html/conflict.html` 由 nginx 直接 alias
+   `/var/www/pvzge-save`。改完源码必须跑 `cd /home/hlh/pvzge && bash tools/deploy-static.sh`；
+   `bash tools/deploy-static.sh --check` 与 `test-cloud-saves.sh` 的静态一致性断言会拦住旧副本。

@@ -176,6 +176,21 @@
       if (current.id === "gp-overlay" || current.id === "ge-toast-wrap") {
         return true;
       }
+      // 存档面板是注入的网页 DOM，不是 Cocos 画面。document 捕获层一旦
+      // preventDefault，面板里的 click 就永远不会合成（FAB 用 pointerup
+      // 所以看起来还能点，关闭/下载按钮全死）。按属性放行；旧版服务端
+      // 脚本没有属性时按固定 id 兜底。
+      if (current.getAttribute &&
+          current.getAttribute("data-pvz-ui") !== null) {
+        return true;
+      }
+      if (current.id === "pvz-admin-mask" ||
+          current.id === "pvz-admin-fab" ||
+          current.id === "pvz-admin-bar" ||
+          current.id === "pvz-version-bar" ||
+          current.id === "pvz-conflict-bar") {
+        return true;
+      }
       const className = typeof current.className === "string"
         ? current.className
         : "";

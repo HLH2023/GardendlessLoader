@@ -59,21 +59,22 @@ bash tools/deploy-save-api.sh      # 生成共享令牌 → 重建容器 → 健
 docker exec pvzge-save md5sum /app/server.py; md5sum save-api/server.py
 ```
 
-## 5. 更新注入脚本（sync.js / ui.js）
+## 5. 更新注入脚本 / 静态页面（sync.js / ui.js / admin.html / conflict.html）
 
-这两个文件会被「打包进 App 注入」的版本（`app-sync.js` / `app-ui.js`）使用，
-改完必须重新生成并落到静态目录：
+浏览器版由 nginx 直接 alias `/var/www/pvzge-save`，App 版还要再生成
+`app-sync.js / app-ui.js / app-admin.html`。两者必须一起更新，否则会出现
+「源码改了、线上还是旧副本」——2026-10-25 的 Web 面板不可用就是这样来的。
 
 ```bash
-APP_SYNC_OUT_DIR=/tmp/pvz-static python3 tools/make-app-sync.py
-# 目录 root 所有 → 用 nsenter 以宿主 root 落地
-docker run --rm --privileged --pid=host --net=host --entrypoint nsenter python:3.13-alpine \
-  -t 1 -m -u -i -n -p -- sh -c "cp -f /tmp/pvz-static/* /var/www/pvzge-save/ && chown root:root /var/www/pvzge-save/*"
-# app-sync.js = SHIM + sync.js（生成器会插入 Bearer 改写层），两者 md5 本来就不同；
-# 正确的核对方式：生成器不报错 + 体积 = shim + sync，且浏览器版与源文件一致
-md5sum save-api/sync.js /var/www/pvzge-save/sync.js      # 必须一致（浏览器版）
-grep -c 'pvzBridgeUrl' /var/www/pvzge-save/app-admin.html  # 必须 ≥1（App 版管理页）
+cd /home/hlh/pvzge
+bash tools/deploy-static.sh          # 生成 App 版 + 复制浏览器版 + 逐文件 cmp
+bash tools/deploy-static.sh --check  # 只核对，不写；CI/收尾必跑
 ```
+
+脚本会先 `node --check` 所有 JS，再用 `make-app-sync.py` 生成到临时目录，
+最后复制 9 个文件并逐个 `cmp`；`/var/www` 不可写时自动用 docker 挂载写入。
+`test-cloud-saves.sh` 也会对 6 个浏览器版文件做源/线上一致性断言。
+App 版的 `app-sync.js` 是 SHIM + `sync.js`，哈希必然不同，不能用 md5 直接比。
 
 > 2026-10-25 修正：旧文档写 `md5sum save-api/sync.js /tmp/pvz-static/app-sync.js`
 > 「必须一致」是错的——`app-sync.js` 由 SHIM（Bearer 改写层）+ `sync.js` 拼成，

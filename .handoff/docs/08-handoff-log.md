@@ -462,3 +462,56 @@
 
 ### 遗留
 - 真机复核：21:9 进游戏确认铺满且不裁切；存档页滚到底部；面板可操作。
+
+## R-20261025-02（存档面板 Web/Windows/Android 修复）/ orchestrator(opencode) / 2026-10-25T17:25+08:00
+
+- status: review
+- 版本: `0.9.0-hlh.22+90022` → `0.9.0-hlh.23+90023`（构建中）
+
+### 现象 → 根因 → 改法 → 断言
+
+#### Web 存档管理不可用 / 只提示差异，不能下载（P0）
+- **根因 1（静态漂移）**：nginx 直接 alias `/var/www/pvzge-save`，源码改了但
+  `ui.js/admin.html/conflict.html` 仍是 13:14 的旧副本。旧 `ui.js` 只给管理员
+  挂 FAB，普通用户只有「↑ 上传」；旧 `admin.html` 没有版本维度/下载。
+- **根因 2（版本丢失）**：nginx 先同步执行 `sync.js`，后 defer 执行
+  `version-check.js`，`GAME_VERSION` 恒为空 → Web 所有 `/load`、`/save` 不带
+  `gameVersion`，进度全写进 legacy；冲突页又用无版本 `/load`，看不到当前版本云端。
+- **改法**：`sync.js` 从页面标题兜底版本并回填 sessionStorage；冲突页按
+  `gameVersion` 读写，新增「下载云端存档（JSON）」，空云端禁用并说明；管理页
+  手动上传取当前版本并带 `gameVersion/baseVer`；新增 `tools/deploy-static.sh`
+  统一生成/部署/核对；删除独立「↑ 上传」按钮，入口收口到「存档」面板。
+- **断言**：cloud 套件 +19（面板/部署/触控/绝对地址）；sync 套件 +3
+  （标题版本、sessionStorage、冲突跳转带版本）；真实 Chrome 冲突页下载/
+  覆盖/上传与 Web 面板普通用户上传均通过。
+
+#### Android 游戏内面板按钮全死 / 面板空白（P0）
+- **根因 1（触控）**：原生 `touch_input_adapter.js` 在 document 捕获阶段对
+  所有 touchstart `preventDefault`，注入 DOM 收不到 click；只有用 pointerup
+  的 FAB 能点，顶部提示条/关闭/面板按钮全失效。
+- **根因 2（空白 iframe）**：`app-ui.js` 生成器用相对路径
+  `/_save/app-admin.html`；离线包 origin 是 `appassets.androidplatform.net`、
+  桌面端是 `127.0.0.1`，相对路径落到本地资源服务器 404，面板只剩 `#12151c`。
+- **改法**：原生适配器把 `data-pvz-ui`/固定 id 当原生控件放行；`ui.js` 在
+  window 捕获阶段保护自身（旧 APK 也生效）；生成器用 `cfg.base` 拼绝对地址。
+- **断言**：`check_touch_patch.mjs` +2 组（属性/旧 id 放行）；Chrome 模拟
+  document 捕获消费：旧 UI 冲突条按钮 0 次打开、关闭后 mask 仍在；新 UI
+  全部 1 次打开、iframe 内按钮可点；真实 app-admin 以 zz-panel 加载。
+
+### 验证（实测）
+- 服务端 **201 通过 / 0 失败**：cloud 97、concurrency 19、versions 41、sync 44。
+- 客户端 **191 通过 / 0 失败**；`flutter analyze` 干净；Android JVM 视口 4 项。
+- `test-cloud-saves.sh` 连续 3 次 97/0；修复 `printf|grep -q` 在 pipefail 下
+  的 SIGPIPE 假失败（200 次实测 186 次误报）。
+- `bash tools/deploy-static.sh --check` 9 个文件全部一致。
+
+### 产物
+- APK 58,634,998 B `8e6858b62c9c2e4fd5c7a17de4b47b5185139204c6d6d76c7276605309151d17`
+- Windows zip 190,024,520 B `66a106484b036eb7ea846f1183a14766672104fd0fe8802f36b133885a302f25`
+- Release `v0.9.0-hlh.23` 两个资产 uploaded；服务端 `26540fc` 已推送。
+
+### 遗留
+- 真机复核：Android 21:9 进游戏后点顶部提示条/面板关闭/下载；Windows 首次
+  自动更新后打开「存档」面板确认 iframe 有内容。
+- Web 首次按版本加载会把 legacy 迁移到 0.16.1；若本机比云端新会进冲突页，
+  这是预期行为，先下载云端 JSON 再决定。
