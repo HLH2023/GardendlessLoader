@@ -4,14 +4,14 @@
   "updatedAt": "2026-10-25T14:50:13+08:00",
   "updatedBy": "orchestrator/opencode",
   "release": {
-    "versionName": "0.9.0-hlh.18",
-    "versionCode": 90018,
-    "apkSha256": "0d504debe2ee1e6e483235e1707c4747d5eb356eae9699ce8c0c205e3a1e3cd6",
-    "apkBytes": 58618208,
-    "windowsSha256": "1bd1f647c14bcc2d296103495ea73fa9530d417f11cf12a586c759e723fb46e9",
-    "windowsBytes": 190006698,
-    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.18",
-    "pendingPublish": false
+    "versionName": "0.9.0-hlh.19",
+    "versionCode": 90019,
+    "apkSha256": "",
+    "apkBytes": 0,
+    "windowsSha256": "",
+    "windowsBytes": 0,
+    "releaseUrl": null,
+    "pendingPublish": true
   },
   "branches": {
     "upstream": {
@@ -36,14 +36,14 @@
     }
   },
   "tests": {
-    "server": 162,
-    "client": 172,
-    "total": 334,
+    "server": 165,
+    "client": 183,
+    "total": 348,
     "suites": [
       {
         "name": "server/cloud-saves",
         "cmd": "bash tools/test-cloud-saves.sh",
-        "count": 67
+        "count": 70
       },
       {
         "name": "server/concurrency",
@@ -68,7 +68,7 @@
       {
         "name": "client/storage-migration",
         "cmd": "dart run tool/check_storage_migration.dart",
-        "count": 62
+        "count": 63
       },
       {
         "name": "client/desktop-zip",
@@ -78,12 +78,12 @@
       {
         "name": "client/game-host-contract",
         "cmd": "dart run tool/check_game_host_contract.dart",
-        "count": 34
+        "count": 39
       },
       {
         "name": "client/update-manifest",
         "cmd": "dart run tool/check_update_manifest.dart",
-        "count": 22
+        "count": 27
       }
     ]
   },

@@ -93,6 +93,10 @@ Future<void> main() async {
       '当前目录的子目录被拒',
       !(await migration.validate(Directory(p.join(currentRoot.path, 'inner')), currentRoot: currentRoot)).ok,
     );
+    check(
+      '当前目录的上级目录被拒',
+      !(await migration.validate(Directory(temp.path), currentRoot: currentRoot)).ok,
+    );
     final aFile = File(p.join(temp.path, 'a-file'));
     await aFile.writeAsString('x');
     check('文件路径被拒', !(await migration.validate(Directory(aFile.path), currentRoot: currentRoot)).ok);

@@ -230,6 +230,37 @@ void main() {
       ).readAsStringSync().contains('readHostCredentials'),
       null);
 
+  // 启动契约：日志是诊断设施，Windows 没有原生日志通道。初始化失败若
+  // 继续向上抛，main 会在 runApp 之前退出，表现为「双击没反应」。
+  final loggerSource =
+      File('lib/src/logging/native_app_logger.dart').readAsStringSync();
+  check('原生日志通道不可用时降级而不是抛错',
+      loggerSource.contains('on MissingPluginException') &&
+          loggerSource.contains('InMemoryAppLogger'),
+      null);
+  check('日志降级快照标记为未持久化',
+      loggerSource.contains('persisting: false') &&
+          loggerSource.contains('degraded: true'),
+      null);
+  final mainSource = File('lib/main.dart').readAsStringSync();
+  check('main 在日志初始化失败时仍继续启动',
+      mainSource.contains('try {') &&
+          mainSource.contains('InMemoryAppLogger') &&
+          mainSource.contains('runApp('),
+      null);
+  // B-04：换不到会话令牌时必须失败关闭，不能把设备令牌塞回页面。
+  final controllerSource =
+      File('lib/src/app_controller.dart').readAsStringSync();
+  check('会话令牌失败时不回退到设备令牌',
+      !controllerSource.contains('var pageToken = deviceToken') &&
+          controllerSource.contains("return '';"),
+      null);
+  check('Windows 更新入口拒绝盘符根目录',
+      File('lib/src/services/windows_updater.dart')
+          .readAsStringSync()
+          .contains('p.rootPrefix(target.path)'),
+      null);
+
   stdout.writeln('\n结果：$passed 通过 / $failed 失败');
   exit(failed == 0 ? 0 : 1);
 }

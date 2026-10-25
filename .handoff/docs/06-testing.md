@@ -1,20 +1,20 @@
 # 06 测试
 
-## 1. 基线：334 项（服务端 162 + 客户端 172）
+## 1. 基线：348 项（服务端 165 + 客户端 183）
 
 ```bash
-# 服务端（162 项）—— 在 /home/hlh/pvzge 下跑
-bash  tools/test-cloud-saves.sh      # 67  云端存档全链路（含吊销、鉴权边界、连接复用、会话令牌）
+# 服务端（165 项）—— 在 /home/hlh/pvzge 下跑
+bash  tools/test-cloud-saves.sh      # 70  云端存档全链路（含吊销、鉴权边界、连接复用、会话令牌、管理接口越界）
 python3 tools/test-concurrency.py    # 19  并发写/锁/乐观版本号
 bash  tools/test-save-versions.sh    # 35  版本隔离 + 向下兼容迁移 + 回滚 + 历史保留策略
 node  tools/test-sync-offline.js     # 41  客户端 sync.js 沙盒（冲突/退避/401/回滚）
 
-# 客户端（172 项）—— 在仓库根目录跑
+# 客户端（183 项）—— 在仓库根目录跑
 dart run tool/check_local_server.dart          # 43  本地服务器（注入/Range/穿越/软链/并发）
-dart run tool/check_storage_migration.dart     # 62  迁移 + 日志自愈 + 空间预检 + 事务门禁
+dart run tool/check_storage_migration.dart     # 63  迁移 + 日志自愈 + 空间预检 + 事务门禁
 dart run tool/check_desktop_zip.dart <zip>     # 11  流式解压 + zip-slip
-dart run tool/check_game_host_contract.dart    # 34  原生退出原因契约 + 会话令牌解析 + 凭据文件契约
-dart run tool/check_update_manifest.dart       # 22  Windows 更新清单 + 版本判定 + 更新脚本编码
+dart run tool/check_game_host_contract.dart    # 39  原生退出原因契约 + 会话令牌解析 + 凭据文件契约 + 启动契约
+dart run tool/check_update_manifest.dart       # 27  Windows 更新清单 + 版本判定 + 更新脚本编码/引号/回滚
 ```
 
 `<zip>` fixture 不是任意包：`check_desktop_zip.dart` 对内容有明确预期

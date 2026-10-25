@@ -32,6 +32,14 @@
 
 （本轮无未决 P1：B-05 / B-08 已关闭，见文末「已关闭」。）
 
+### B-18 管理页看不到按版本分区的存档
+- 现象：`/list` 只扫用户目录根下的 `*.json`（legacy），`by-version/<gv>/` 完全不出现在管理页；
+  `/history`、`/version`、`/restore` 虽已支持 `gameVersion`，但页面从不传。
+- 影响：1.6.x 之后的存档在管理页不可见，回滚只能靠手写 API 调用。
+- 要做：`/list` 增加按版本聚合（返回 `gameVersion` 维度）；管理页加载历史/下载/回滚时带上
+  该版本；`/delete` 增加版本参数校验。
+- 判据：`test-cloud-saves.sh` 增加「按版本列表 → 历史 → 回滚」三段断言，管理页能切换版本。
+
 ## P2
 
 - B-10 `pvzge-auth` 容器已停但 compose 定义仍在（宿主重启可能复活）。
@@ -39,21 +47,6 @@
 - B-12 new-api 日志 3.1 GB 未清（磁盘）。
 - B-13 GitLab 明文 DB/SMTP 密码待轮换。
 - B-14 代理池 `.22` 的 Anthropic 规则固定路由到失效美国组（与客户端无关，运维遗留）。
-
-### B-15 公开仓历史里含服务器域名（已修源码，历史待清理）
-- 现象：`origin`(HLH2023/GardendlessLoader) 是**公开**仓，历史提交 `0f23799` 的
-  `tool/check_cloud_saves.dart` 里有一行 `defaultValue: '<服务器域名>'`。
-- 已做：源码已改为 `String.fromEnvironment('PVZGE_SERVER')` 无默认值，并加运行时缺失提示；
-  `tools/handoff.sh verify` 新增「源码敏感扫描」一节把它固化成断言。
-- 未做（**需要用户拍板**）：重写公开仓历史。命令参考（在本地备份分支后执行）：
-  ```bash
-  git branch backup/pre-purge-$(date +%s)
-  git filter-repo --path tool/check_cloud_saves.dart --invert-paths --force   # 或只替换该字面量
-  git push --force-with-lease origin HEAD:refs/heads/feature/app-update
-  ```
-  注意：GitHub 仍可能通过提交 SHA 缓存旧对象，彻底清除需向 GitHub 支持申请 purge。
-  域名本身不是凭据（访问仍需 authentik + Bearer），因此以「不再扩散 + 源码干净」为当前达标线。
-
 
 ## 明确不归你（agent）做的
 
@@ -106,3 +99,11 @@ history 目录本身就在 by-version/<gv> 下，所以 1.6.1 的清理动不到
 robocopy 覆盖 → 失败自动回滚并重启 → 清理。安装目录不可写时直接拒绝，不启动脚本。
 断言：check_update_manifest.dart 22 条（清单解析、版本判定、文件名防穿越）+ 脚本 BOM/CRLF；
 脚本在 Windows 构建机的沙盒目录实测：文件替换、旧文件保留、备份清理、退出码 0。`
+
+`B-15 公开仓历史里含服务器域名 → 已清理（2026-10-25）→
+用 git filter-branch 对全部 branches+tags 做 tree-filter，把 tool/check_cloud_saves.dart 里的
+域名字面量替换为 <server>；本地备份 bundle 在 /tmp/opencode/pre-purge-*.bundle（41 MB）。
+重写后 origin/feature/app-update 与 private/main 均以 --force-with-lease 强推，
+重新 fetch 后 git grep 全历史 0 命中；本地 refs/original 已删、reflog 过期、gc --prune=now。
+注意：GitHub 仍可能按旧 commit SHA 缓存对象，若要求彻底不可达需向 GitHub Support 申请 purge；
+域名本身不是凭据（仍需 authentik + Bearer），当前达标线是「源码与可达历史均无字面量」。`

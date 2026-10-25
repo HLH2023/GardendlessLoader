@@ -155,6 +155,20 @@ Future<void> main() async {
       WindowsUpdaterScript.script.contains('WaitPid') &&
           WindowsUpdaterScript.script.contains('Get-Process -Id'),
       null);
+  check('更新脚本给 robocopy 路径加引号',
+      WindowsUpdaterScript.script.contains(r'''$arg = '"' + $Source''') &&
+          WindowsUpdaterScript.script.contains(r'''+ '" "' + $Destination'''),
+      null);
+  check('更新脚本拒绝盘符根目录',
+      WindowsUpdaterScript.script.contains(r'^[A-Za-z]:$'), null);
+  check('回滚用 /MIR 恢复精确状态',
+      WindowsUpdaterScript.script.contains("\$backup \$Target '/MIR"), null);
+  check('解压失败会清理临时目录',
+      WindowsUpdaterScript.script.contains(
+          'Remove-Item \$stage -Recurse -Force -ErrorAction SilentlyContinue'),
+      null);
+  check('杀残留进程按目录边界匹配',
+      WindowsUpdaterScript.script.contains(r"$targetPrefix = $Target + '\'"), null);
   final temp = await Directory.systemTemp.createTemp('gl-updater-script');
   try {
     final file = await WindowsUpdaterScript.write(

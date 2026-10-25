@@ -1,7 +1,7 @@
 name: gardendless_loader
 description: Local Flutter loader for user-supplied PvZ2 Gardendless web resources.
 publish_to: "none"
-version: 0.9.0-hlh.18+90018
+version: 0.9.0-hlh.19+90019
 
 environment:
   sdk: ">=3.5.0 <4.0.0"

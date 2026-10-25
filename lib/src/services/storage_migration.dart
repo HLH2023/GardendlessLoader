@@ -40,6 +40,16 @@ class ResourceMigration {
       if (normalized.startsWith('$rootPath${p.separator}')) {
         return const StorageCheck(ok: false, message: '不能放在当前资源目录里面');
       }
+      // 反过来也不行：目标若是当前目录的上级（例如把资源根从
+      // C:\Users\me\Gardendless 改到 C:\Users\me），搬迁会先删掉目标位置
+      // 同名的 downloads/settings.json，用户数据直接丢失。
+      if (rootPath.startsWith('$normalized${p.separator}') ||
+          rootPath == normalized) {
+        return const StorageCheck(
+          ok: false,
+          message: '不能放在当前资源目录的上级目录（会覆盖那里的同名文件）',
+        );
+      }
     }
     final dir = Directory(path);
     try {

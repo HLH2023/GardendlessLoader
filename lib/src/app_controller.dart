@@ -3535,8 +3535,9 @@ class AppController extends ChangeNotifier {
     if (base.isEmpty || deviceToken.isEmpty) return '';
     try {
       // 页面只拿短时会话令牌：设备令牌留在启动器/原生侧，不进 JS。
-      // 旧服务端没有 /token/session 时回退到设备令牌，保证功能不中断。
-      var pageToken = deviceToken;
+      // 换不到会话令牌时必须失败关闭：绝不能把设备令牌塞进页面，
+      // 否则一次接口抖动就等于撤销了 B-04 的隔离（页面重新持有长期凭据）。
+      final String pageToken;
       String? sessionExpiresAt;
       try {
         final session = await _remoteResourceService.issueSaveSessionToken(
@@ -3562,6 +3563,8 @@ class AppController extends ChangeNotifier {
           error: error,
           stackTrace: stackTrace,
         );
+        // 本次启动不注入存档桥：游戏照常离线玩，只是没有云存档。
+        return '';
       }
       final script = await _remoteResourceService.fetchAppSyncScript(
         token: deviceToken,

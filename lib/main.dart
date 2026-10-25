@@ -16,9 +16,28 @@ import 'src/ui/theme/garden_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final logger = await NativeAppLogger.initialize(
-    eventSchemas: defaultLogEventSchemas,
-  );
+  // 日志是诊断设施，不是启动前置条件。任何初始化失败都必须降级继续：
+  // Windows 没有原生日志实现，直接抛异常会让 runApp 永远不执行。
+  AppLogger logger;
+  try {
+    logger = await NativeAppLogger.initialize(
+      eventSchemas: defaultLogEventSchemas,
+    );
+  } catch (error, stackTrace) {
+    logger = InMemoryAppLogger(
+      appSessionId: 'local-'
+          '${DateTime.now().toUtc().microsecondsSinceEpoch.toRadixString(16)}',
+    );
+    logger.emit(
+      level: LogLevel.fatal,
+      category: 'app.logging',
+      event: 'native_logger_unavailable',
+      outcome: LogOutcome.degraded,
+      code: 'logger_init_failed',
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     logger.emit(
@@ -65,7 +84,7 @@ Future<void> main() async {
 class GardendlessLoaderApp extends StatefulWidget {
   const GardendlessLoaderApp({required this.logger, super.key});
 
-  final NativeAppLogger logger;
+  final AppLogger logger;
 
   @override
   State<GardendlessLoaderApp> createState() => _GardendlessLoaderAppState();
