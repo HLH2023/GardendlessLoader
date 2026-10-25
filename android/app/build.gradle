@@ -44,6 +44,12 @@ android {
                 keyPassword = keystoreProperties["keyPassword"]
                 storeFile = file(keystoreProperties["storeFile"])
                 storePassword = keystoreProperties["storePassword"]
+                // AGP 在 minSdk >= 24 时默认只签 v2，部分国产 ROM 的安装器
+                // 找不到 META-INF 下的 JAR 签名就直接报「安装包没有签名文件」。
+                // 三种方案全开：v1 兼容老安装器，v2/v3 是现代的完整性校验。
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
             }
         }
     }
