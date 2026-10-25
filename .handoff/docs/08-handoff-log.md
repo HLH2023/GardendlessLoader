@@ -166,3 +166,4 @@
    再 `gh release create v0.9.0-hlh.17` 上传 `dist/` 两个产物；
 5. 复核并推送服务端仓库三处改动；
 6. 发布后补 `state.json.release.releaseUrl` 并把 `pendingPublish` 置 false。
+7. 把 `HANDOFF.md` 第 2 节更新到 hlh.17（版本、能力矩阵、基线 286），并勾选第 4 节验收项。

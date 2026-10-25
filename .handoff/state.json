@@ -274,7 +274,8 @@
         "部署后重跑 bash tools/test-cloud-saves.sh，预期 58 通过 / 0 失败；把结果回填 08 日志",
         "发布：bash tools/publish-apk.sh dist/gardendless-loader-0.9.0-hlh.17.apk --version 0.9.0-hlh.17；然后 gh release create v0.9.0-hlh.17 --repo HLH2023/gardendless-app，资产用 dist/ 下两个产物",
         "复核并推送服务端仓库改动（save-api/server.py、save-api/admin.html、tools/test-cloud-saves.sh）",
-        "发布后把 state.json.release.releaseUrl 填上、pendingPublish 置 false"
+        "发布后把 state.json.release.releaseUrl 填上、pendingPublish 置 false",
+        "把 HANDOFF.md 第 2 节更新到 hlh.17（版本/能力矩阵/测试基线 286），并在第 4 节勾选验收项"
       ],
       "verifyOutput": "== 文件齐备 ==\n  ok   存在 .handoff/PROTOCOL.md\n  ok   存在 .handoff/HANDOFF.md\n  ok   存在 .handoff/state.json\n  ok   存在 .handoff/docs/01-architecture.md\n  ok   存在 .handoff/docs/02-branches.md\n  ok   存在 .handoff/docs/03-versioning.md\n  ok   存在 .handoff/docs/04-build.md\n  ok   存在 .handoff/docs/05-deployment.md\n  ok   存在 .handoff/docs/06-testing.md\n  ok   存在 .handoff/docs/07-backlog.md\n  ok   存在 .handoff/docs/08-handoff-log.md\n  ok   存在 .handoff/prompts/01-start.md\n  ok   存在 .handoff/prompts/02-return.md\n  ok   存在 .handoff/skills/gardendless-dev/SKILL.md\n\n== state.json 结构 ==\n  ok   OK review suites= 8 total= 286\n\n== 回执完整性 ==\n  ok   OK 2 条回执字段完整\n\n== 敏感信息扫描（.handoff + AGENTS.md + tools/handoff.sh） ==\n  ok   未发现服务器地址/令牌字面量\n\n== 源码敏感扫描（lib/tool/android/.github/pubspec/docs） ==\n  ok   源码与配置未出现服务器地址/令牌\n\n== AGENTS.md 只放持久信息 ==\n  ok   未出现版本号/任务号/测试数字/哈希等易变事实\n\n== Windows 构建脚本编码 ==\n  ok   build-windows.ps1 为 UTF-8 BOM + CRLF（bom-ok crlf=70 lf_only=0）\n\n== 短提示词长度 ==\n  ok   01-start.md 共 9 行（≤14）\n\n== 技能安装 ==\n  ok   已装入 opencode 全局 skills\n\n结果：22 通过 / 0 失败 / 0 警告"
     }
