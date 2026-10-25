@@ -94,15 +94,16 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 ## 6. 必读顺序
 
 1. `PROTOCOL.md` —— 契约、状态机、回执字段（5 分钟）
-2. 本文档（你在读）
-3. `docs/01-architecture.md` —— 客户端双形态 + 服务端数据流
-4. `docs/02-branches.md` —— 三个远端的关系与推送规则
-5. `docs/03-versioning.md` —— `-hlh.N` 规则、发版四步
-6. `docs/04-build.md` —— 本机 vs Windows 主机分别做什么
-7. `docs/05-deployment.md` —— 服务端组件、容器、nginx 路由
-8. `docs/06-testing.md` —— 251 项怎么跑、卡住了怎么排查
-9. `docs/07-backlog.md` —— 已知缺陷与待决策项（这就是你的工作清单）
-10. `docs/08-handoff-log.md` —— 历次接力的回执存档
+2. `AGENTS.md`（仓库根）：开发范式 + **如何查明状态/判断进度/判断待完成**的方法论
+3. 本文档（你在读）
+4. `docs/01-architecture.md` —— 客户端双形态 + 服务端数据流
+5. `docs/02-branches.md` —— 三个远端的关系与推送规则
+6. `docs/03-versioning.md` —— `-hlh.N` 规则、发版四步
+7. `docs/04-build.md` —— 本机 vs Windows 主机分别做什么
+8. `docs/05-deployment.md` —— 服务端组件、容器、nginx 路由
+9. `docs/06-testing.md` —— 测试基线怎么跑、卡住了怎么排查
+10. `docs/07-backlog.md` —— 已知缺陷与待决策项（这就是你的工作清单）
+11. `docs/08-handoff-log.md` —— 历次接力的回执存档
 
 ## 7. 开工动作
 

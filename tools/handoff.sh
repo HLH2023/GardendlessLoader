@@ -120,6 +120,13 @@ print('OK', len(rs), '条回执字段完整')
     lib tool android .github pubspec.yaml 2>/dev/null | grep -v '<server>' || true)
   if [ -z "$src_hits" ]; then ok "源码与配置未出现服务器地址/令牌"; else bad "源码里有字面量："; printf '%s\n' "$src_hits" | head -5; fi
 
+  sec "AGENTS.md 只放持久信息"
+  local volatile
+  volatile=$(grep -nE '[0-9]+\.[0-9]+\.[0-9]+-hlh\.[0-9]+|R-20[0-9]{6}-[0-9]+|[0-9]+ 项全绿|sha256.*[0-9a-f]{16,}' \
+    "$ROOT/AGENTS.md" 2>/dev/null || true)
+  if [ -z "$volatile" ]; then ok "未出现版本号/任务号/测试数字/哈希等易变事实"
+  else bad "AGENTS.md 里混入了易变事实（应改为「怎么查」）："; printf '%s\n' "$volatile" | head -5; fi
+
   sec "短提示词长度"
   local lines; lines=$(grep -cve '^$' "$H/prompts/01-start.md" 2>/dev/null || echo 99)
   [ "$lines" -le 14 ] && ok "01-start.md 共 $lines 行（≤14）" || warn "01-start.md 有 $lines 行，偏长"

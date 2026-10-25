@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "project": "GardendlessLoader",
-  "updatedAt": "2026-10-25T14:20:00+08:00",
+  "updatedAt": "2026-10-25T14:45:00+08:00",
   "updatedBy": "hermes",
   "release": {
     "versionName": "0.9.0-hlh.16",
@@ -112,6 +112,13 @@
       "event": "security-fix",
       "task": "R-20261025-01",
       "note": "清理源码中的服务器域名字面量（tool/check_cloud_saves.dart 默认值）；verify 增加源码敏感扫描；公开仓历史清理列入 B-15 待用户决策"
+    },
+    {
+      "at": "2026-10-25T14:45:00+08:00",
+      "by": "hermes",
+      "event": "docs",
+      "task": "R-20261025-01",
+      "note": "AGENTS.md 重写为持久层范式文档（只讲怎么做/怎么判断，状态一律指向 state.json/HANDOFF/docs）；verify 新增「AGENTS.md 只放持久信息」断言"
     }
   ]
 }

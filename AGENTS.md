@@ -1,77 +1,213 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## 0. 这份文件管什么
 
-- `lib/main.dart` starts the app.
-- `lib/src/app_controller.dart` coordinates state, imports, native GameHost launch, announcements, and update checks.
-- `lib/src/services/` holds resource validation, ZIP import, manifest storage, diagnostics, and filesystem self-checks.
-- `lib/src/game_host/` defines the durable native GameSession and platform-channel launch contract.
-- `lib/src/ui/` contains the Flutter launcher screen in `home_page.dart`.
-- `assets/game_bridge/` contains the shared document-start scripts injected by every native GameHost.
-- Maintained platform folders are `android/`, `ios/`, and `ohos/`.
-- `announcements.json` is the remote announcement payload; `docs/acceptance-checklist.md` records manual release checks.
-- `docs/research/native_gamehost_local_resource_loading.md` records the native GameHost security constraints and device-validation limits.
+本文件只写**长期不变**的东西：项目结构、开发范式、协作协议，以及**如何自行查明状态**的方法。
 
-## Build, Test, and Development Commands
+凡是每次迭代都会变的事实——当前版本号、进行中的任务、待办清单、测试数字、产物哈希——
+**一律不写在这里**。写成常量就会立刻过期，而过期文档比没有文档更危险：它会让后来者相信
+一个已经不成立的前提。正确做法是留下路径：去哪里找、看哪个字段、怎么交叉验证。
 
-- `flutter pub get` installs Dart and Flutter dependencies.
-- `flutter analyze` runs static analysis with the repository lint rules.
-- `flutter run` starts the app on a connected supported device.
-- `flutter build apk --release` builds Android.
-- `flutter build ios --release --no-codesign` builds unsigned iOS artifacts.
+一句话：**这里写「怎么做事」和「怎么判断」，不写「现在是什么」。**
 
-For HarmonyOS/OpenHarmony, copy `pubspec_overrides.ohos.yaml` to `pubspec_overrides.yaml`, use the OpenHarmony Flutter SDK, and follow `README.md`.
+## 1. 项目性质
 
-## Coding Style & Naming Conventions
+一个 Flutter 外壳 + 原生 WebView 承载的网页游戏启动器。上游作者维护主线，本仓库在其上叠了
+一条**个人构建线**：离线资源包、云存档、双端一致、自更新。
 
-This project uses `package:flutter_lints/flutter.yaml` plus `prefer_single_quotes`. Use two-space Dart indentation, `UpperCamelCase` for classes/widgets, `lowerCamelCase` for methods and variables, and `snake_case.dart` filenames. Keep service logic in `lib/src/services/` and UI code in `lib/src/ui/`. Run `dart format lib` before submitting.
+因此有两套并行语义，任何时候不要混淆：
 
-## Validation Guidelines
+- **客户端版本**（决定升级与安装包覆盖）→ 由 `pubspec.yaml` 的 `version` 承载。
+- **游戏版本**（决定存档能不能通用的分区键）→ 由服务端资源清单承载。
 
-The Flutter unit and widget test suite was removed at the user's request. Do not recreate per-feature Flutter test files automatically. Validate Dart changes with `flutter analyze`, build the affected maintained platforms, and verify relevant workflows on devices. Existing native and shared JavaScript checks remain available.
+改其中一套时不要顺手改另一套。
 
-## Commit & Pull Request Guidelines
+## 2. 项目结构
 
-Recent history uses short prefixes such as `Fix:`, `Update:`, and `Modify:`. Follow `Type: concise imperative summary`, for example `Fix: handle nested docs imports`. PRs should describe the change, list tested commands, link issues when applicable, and include screenshots or recordings for UI changes.
+- `lib/main.dart` 启动应用。`lib/src/app_controller.dart` 是唯一的编排层：状态、资源导入、
+  游玩形态、存档桥、公告与更新检查、日志。**改行为先读它。**
+- `lib/src/services/` 领域服务：资源校验与导入事务、ZIP 解压、本地资源服务器、存储迁移、
+  设置存储、云端存档与资源客户端、诊断与文件系统自检。
+- `lib/src/game_host/` 原生游戏宿主契约（`GameSession` + 平台通道）。
+- `lib/src/ui/` 界面层，页面在 `lib/src/ui/pages/`。
+- `assets/game_bridge/` 各原生宿主共用的 document-start 注入脚本。
+- 维护中的平台目录：`android/`、`ios/`、`ohos/`、`windows/`。
+- `tool/` 本机可直接跑的验收脚本（不需要设备）；`tools/` 构建、发布、打包与协作脚本。
+- `announcements.json` 远端公告载荷；`docs/acceptance-checklist.md` 上游的手工发布检查项；
+  `docs/research/native_gamehost_local_resource_loading.md` 记录原生宿主的安全约束与设备验证边界。
+- `.handoff/` 协作接力的协议与文档（见第 3 节）。
 
-## Security & Configuration Tips
+构建命令：`flutter pub get` 装依赖，`flutter analyze` 做静态分析，`flutter run` 跑在已连接设备上，
+`flutter build apk --release` 出 Android 包，`flutter build ios --release --no-codesign` 出未签名 iOS。
+鸿蒙/OpenHarmony 需把 `pubspec_overrides.ohos.yaml` 复制成 `pubspec_overrides.yaml` 并换用
+OpenHarmony Flutter SDK，细节见 `README.md`。**Windows 只能在 Windows 机器上构建**（见 4.3）。
 
-Do not commit bundled game resources, signing files, generated archives, or `.DS_Store` files. Keep Android signing values in CI secrets. Preserve active-slot path confinement and non-allowlisted WebView request blocking.
+## 3. 协作协议：状态不在对话里
 
-## Agent skills
+本项目由多个 agent（不同工具、不同上下文、不同时间）接力推进。对话会丢、会压缩、会被误读，
+所以状态只存在于磁盘上的固定位置。任何 agent 都不得凭记忆行事，也不得把「我记得」当作依据。
 
-### Issue tracker
+**权威来源与优先级：**
 
-Issues and PRDs are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
+| 优先级 | 位置 | 它回答什么 |
+|---|---|---|
+| 1 | `.handoff/PROTOCOL.md` | 契约：状态机、回执必填字段、红线。与其它任何描述冲突时以此为准 |
+| 2 | `.handoff/state.json` | **唯一状态事实源**：发布信息、分支映射、测试基线、当前任务、回执、时间线 |
+| 3 | `.handoff/HANDOFF.md` | 交接主文档：架构速览、当前能力、本次任务、验收标准、必读顺序 |
+| 4 | `.handoff/docs/01..08` | 稳定的领域知识：架构、分支、版本、构建、部署、测试、待办、日志 |
+| 5 | 本文件 | 做事的方法与判定方式（不含易变事实） |
 
-### Domain docs
+### 3.1 怎么查明「现在是什么状态」
 
-This repository uses a single-context domain documentation layout. See `docs/agents/domain.md`.
+```bash
+bash tools/handoff.sh status     # 版本、当前任务、状态、测试基线、回执数
+bash tools/handoff.sh verify     # 交接包是否完整自洽（必须 0 失败才继续）
+```
 
-## Agent 接力（Hermes ⇄ OpenChamber）— 先读这一节
+需要更细的字段就直接读 `.handoff/state.json`：
 
-本仓库有一条**个人构建线**（版本号以 `-hlh.N` 结尾），由 Hermes 与 OpenChamber 开发 agent
-接力推进。任何接手的 agent 在动代码之前必须：
+- `release` → 最近一次发布的版本号、产物大小与 sha256、Release 地址
+- `branches` → 上游 / 公开 fork / 私有仓三个远端各自的角色与分支
+- `tests` → 测试基线与各套件期望条数
+- `task` → 当前任务的 id、标题、状态、范围、**明确排除项**
+- `receipts[]` → 历次交付的自报内容（**自报不等于事实**，见 3.4）
+- `handoffLog[]` → 人类可读的事件时间线
 
-1. 读 `.handoff/HANDOFF.md`（交接主文档：当前状态 + 本次任务 + 验收标准）
-2. 读 `.handoff/PROTOCOL.md`（契约：状态机、回执必填字段、红线）
-3. 跑 `bash tools/handoff.sh status && bash tools/handoff.sh verify`（必须 0 失败）
-4. 需要细节再按 `HANDOFF.md` 第 6 节的顺序读 `.handoff/docs/01..08`
+版本号永远以两处交叉为准：`pubspec.yaml` 的 `version` 与 `state.json.release.versionName`
+必须一致。不一致说明有人改了代码没更新状态、或改了状态没发版——两种情况都要先问清再动手。
 
-摘要（详见上述文件）：
+### 3.2 怎么判断「做到哪一步了」
 
-- **分支**：`upstream`(Dey410) 只读，**不推不改不提 PR**；开发推 `origin:feature/app-update`；
-  产物与镜像推 `private:main`。
-- **版本**：`versionName = X.Y.Z-hlh.N`，`versionCode = major*1e6 + minor*1e4 + patch*100 + N`。
-- **构建边界**：`flutter analyze`、`dart run tool/*.dart`、服务端测试、Android APK 在本机；
-  **Windows exe 只能在 Windows 主机上构建**（`ssh win`）。
-- **安全红线**：个人服务器地址与令牌**绝不写进任何受版本控制的文件**，只用 `PVZGE_SERVER`
-  环境变量 / CI secret / `.env.local`(0600, gitignored)。
-- **改动前先看既有机制**：启动/迁移/导入互斥、`streaming_zip.dart`、`local_resource_server.dart`、
-  `OnlineSessionHeartbeat.kt` 都已有实现与断言，别重造。
-- **交付**：按 `PROTOCOL.md` 第 3 节写回执（真实命令输出 + 真实测试数字 + 产物 sha256），
-  跑 `bash tools/handoff.sh verify` 到 0 失败。
+进度不是感觉，是三处证据的交集：
 
-改完代码后请补上一次性小提示：本仓库的 Flutter 单元/组件测试套件是**故意移除**的（见下文
-Validation Guidelines），不要把新增逻辑写成 `test/` 下的 widget test；改为加进
-`tool/check_*.dart` 或服务端 `tools/test-*.sh`。
+1. **契约层**：`state.json.task.status` 走到哪一格。状态机是
+   `draft → dispatched → accepted → in_progress → (review | blocked) → done`，
+   只允许逐格前进；可退到 `blocked`；允许 `review → in_progress`（打回重做）。跳格无效。
+2. **文档层**：`HANDOFF.md` 第 4 节验收清单勾了几条。清单没勾完就不算完成，
+   哪怕代码已经写完。
+3. **事实层**：`git log` / `git diff` 里真的有对应改动；测试套件真的跑出数字且不低于基线；
+   产物真的存在、sha256 与回执一致。
+
+三者对不上时，**事实层赢**。代码没改就是没改，测试没跑就是没跑；计划、「应该已经好了」、
+以及任何情绪判断都不算证据。
+
+### 3.3 怎么判断「还剩什么」
+
+待办有三层，别只看一层：
+
+1. **本次任务范围内**的剩余 → `HANDOFF.md` 第 3 节（要做什么）与第 4 节（做到什么算完）的差集。
+2. **长期缺陷池** → `.handoff/docs/07-backlog.md`，按 `P0 / P1 / P2` 分级，每条都写了
+   「现象 → 根因 → 要做 → 判据」。修完的移到文末「已关闭」并留下断言名，不要直接删除。
+3. **刚发现的** → 回执里的 `remaining` 字段。规则：**先写进 backlog，再决定修不修**；
+   只存在于对话或脑子里的问题等于已经丢失。
+
+同时留意 `HANDOFF.md` 第 3 节里的**明确排除项**——被列进「不做」的不是遗漏，是决定。
+
+### 3.4 回执与自报的边界
+
+交付时按 `PROTOCOL.md` 第 3 节写回执：改了什么、跑了哪些命令（含真实输出片段）、
+各套件真实数字、产物路径与哈希、残留问题、需要他人执行的运维动作。
+
+**数字必须真跑出来。没跑就写 `not-run` 并说明原因，不许写「应该通过」。**
+回执是自报，接受方会复核（重跑测试、实测哈希、比对 diff）。`verify` 只能挡住「漏字段」
+和「数字自相矛盾」，挡不住「编得很圆」——所以复核环节不可省。
+
+## 4. 开发范式
+
+### 4.1 分支与去向
+
+三个远端角色固定：上游主线（**只读参考，不推、不改、不提 PR**）、我们的公开 fork
+（日常工作分支）、私有仓（代码镜像与发布产物）。远端地址、分支名、当前提交与推送命令
+见 `.handoff/docs/02-branches.md`。
+
+推送纪律：功能改动推公开 fork 的工作分支；发版时在私有仓建 Release。
+
+### 4.2 版本与发布
+
+版本格式与 `versionCode` 的换算规则、升级脚本、发布四步、发版后必验项，全部在
+`.handoff/docs/03-versioning.md`。**每次发版都必须走完那四步**，少一步就会出现
+「代码发了、包没发」或「包发了、版本号没升」。
+
+### 4.3 构建边界
+
+有些事只能在特定机器上做，搞错会浪费大量时间：
+
+- 本机可做：静态分析、Dart 验收脚本、服务端测试、Android 构建。
+- **Windows 可执行文件只能在 Windows 机器上构建**（不可交叉编译）。连接方式、构建脚本，
+  以及三个必踩的坑（PowerShell 编码、默认 shell 的引号、`build/` 与 `.dart_tool/` 状态不一致）
+  见 `.handoff/docs/04-build.md`。
+- 服务端部署、容器重建、网关规则、资源包重打包属于运维副作用动作，见
+  `.handoff/docs/05-deployment.md`，由具备环境权限的一方执行。
+
+### 4.4 测试
+
+测试基线与各套件命令见 `.handoff/state.json.tests` 与 `.handoff/docs/06-testing.md`。
+
+- **断言加进现有套件，不新建框架。**
+- 本仓库的 Flutter 单元/组件测试套件是**有意移除**的：不要自动重建 `test/` 下的 widget test，
+  新增逻辑改为加进 `tool/check_*.dart` 或服务端 `tools/test-*.sh`。
+- 基线只许上升不许下降。若某条断言确实该删，必须在回执里说明理由。
+- 安全相关逻辑必须同时有正例与反例（合法请求成功 + 非法请求被拒）。
+- 性能敏感路径（大文件解压、大响应转发）要有资源占用判据，不能只看「跑通」。
+
+### 4.5 改动前的三条自检
+
+1. **先看既有实现**：启动/导入/迁移/切换形态的互斥、解压、本地服务器、在线心跳、存档语义
+   都已有实现与断言。重造一套是最常见的破坏方式。
+2. **先看状态门禁**：任何破坏性入口（启动游戏、导入资源、切换形态、改存储位置、删除资源）
+   必须同时检查内存门禁与持久化事务状态；门禁清单见 `.handoff/docs/01-architecture.md`。
+3. **先看安全约束**：路径穿越、符号链接逃逸、压缩包条目越界、鉴权头伪造这几类问题都踩过
+   并留有断言；新增文件读写或代理逻辑前先对照一遍。
+
+## 5. 编码风格
+
+`package:flutter_lints/flutter.yaml` 加 `prefer_single_quotes`；两空格缩进；类/组件用
+`UpperCamelCase`，方法与变量用 `lowerCamelCase`，文件名用 `snake_case.dart`。服务逻辑放
+`lib/src/services/`，界面放 `lib/src/ui/`。提交前跑 `dart format lib`。
+
+注释写「为什么」，不写「是什么」。反直觉的地方（绕开某个平台缺陷、为兼容旧数据保留的字段、
+必须异步否则会阻塞主线程）一定要留一句原因，否则下一个人会把它「优化」掉。
+
+## 6. 安全与配置
+
+- **个人服务器地址、令牌、密码不得进入任何受版本控制的文件。** 通过环境变量、CI secret 或
+  本地 `.env.local`（600 权限、已忽略）注入；文档里只写变量名与占位符。
+- 不提交打包好的游戏资源、签名文件、生成的归档、`.DS_Store`。
+- 签名配置放 CI secret，安装包签名方案按发布文档执行。
+- 保持资源根目录的路径约束与 WebView 请求白名单：这两处是历史漏洞的入口。
+
+## 7. 提交与协作
+
+提交信息沿用上游风格 `Type: 一句话说清做了什么`（`Fix:` / `Update:` / `Modify:` / `Add:`）；
+个人构建线可用 `<版本序号>: 主题` 开头，正文分「改了什么 / 为什么 / 怎么验证」。
+PR 应说明改动、列出跑过的命令、必要时附截图或录屏。
+
+Issue 与 PRD 记录在 GitHub Issues（见 `docs/agents/issue-tracker.md`）；
+领域文档采用单上下文布局（见 `docs/agents/domain.md`）。
+
+## 8. 反模式清单
+
+以下做法在本项目里被证明会造成实际损失，见到就停下：
+
+| 反模式 | 后果 |
+|---|---|
+| 把当前版本、任务、待办写进 `AGENTS.md` 或代码注释 | 立刻过期，误导后来者 |
+| 凭记忆或对话摘要判断状态 | 与实际分支、测试结果不一致 |
+| 回执写「应该通过」「预计没问题」 | 无法复核，等于没做验证 |
+| 声称完成但验收清单没勾完 | 交付被退回，返工成本翻倍 |
+| 为省事把大文件整包读进内存 | 低内存机器直接不可用（有历史事故） |
+| 发现新问题只口头记下 | 下一轮必然丢失 |
+| 跳过既有实现另写一套 | 绕过既有断言，回归缺陷重新出现 |
+| 用跳过测试的方式让流水线变绿 | 基线失真，之后所有判断都不可信 |
+
+## 9. Agent 技能
+
+- 接力协作技能在 `.handoff/skills/`，并已安装到 agent 的技能目录以便自动发现。
+- 上游技能的约定入口见 `docs/agents/`。
+
+## 10. 开工顺序
+
+读 `.handoff/PROTOCOL.md` → 本文档 → `.handoff/HANDOFF.md` → 该文档指示的 `docs/` 篇目 →
+跑 `bash tools/handoff.sh status` 与 `verify` → 再动代码。
+
+先跑 `verify` 而不是先跑构建：交接包不完整时，后面所有判断都建立在坏地基上。
