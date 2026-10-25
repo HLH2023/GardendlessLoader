@@ -295,7 +295,7 @@ class LocalResourceServer {
     var result = html;
     for (final name in const ['sync.js', 'ui.js', 'touch.js', 'version-check.js', 'app-sync.js', 'app-ui.js']) {
       result = result.replaceAll(
-        RegExp('<script[^>]*src="[^"]*${RegExp.escape(name)}"[^>]*>\s*</script>'),
+        RegExp(r'<script[^>]*src="[^"]*' + RegExp.escape(name) + r'"[^>]*>\s*</script>'),
         '',
       );
     }

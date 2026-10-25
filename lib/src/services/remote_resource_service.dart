@@ -276,10 +276,18 @@ class RemoteResourceService {
   Future<CloudSaveSnapshot> fetchCloudSaves({
     required String token,
     required String baseUrl,
+    String gameVersion = '',
     Duration timeout = saveServerRequestTimeout,
   }) async {
+    var uri = _resolve(baseUrl, saveLoadPath);
+    // 存档按游戏版本隔离：不传版本就只能看到未分区的老存档
+    if (gameVersion.trim().isNotEmpty) {
+      uri = uri.replace(queryParameters: <String, String>{
+        'gameVersion': gameVersion.trim(),
+      });
+    }
     final body = await _getText(
-      _resolve(baseUrl, saveLoadPath),
+      uri,
       token: token,
       timeout: timeout,
       maxBytes: saveServerSavesMaxBytes,
@@ -298,6 +306,7 @@ class RemoteResourceService {
     required String baseUrl,
     required String user,
     required String key,
+    String gameVersion = '',
     int limit = saveServerHistoryLimit,
     Duration timeout = saveServerRequestTimeout,
   }) async {
@@ -306,6 +315,7 @@ class RemoteResourceService {
         'user': user,
         'key': key,
         'limit': '$limit',
+        if (gameVersion.trim().isNotEmpty) 'gameVersion': gameVersion.trim(),
       },
     );
     final body = await _getText(

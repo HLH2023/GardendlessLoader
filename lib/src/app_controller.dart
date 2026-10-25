@@ -215,7 +215,10 @@ class AppController extends ChangeNotifier {
 
   /// Only the Android host implements extracting a downloaded ZIP; elsewhere
   /// the launcher must not start a multi-gigabyte download it cannot import.
-  bool get serverResourceDownloadSupported => Platform.isAndroid;
+  /// 下载/导入资源包：Android 与桌面端都支持（桌面端跑本地资源同样需要）。
+  /// iOS 等还没有本地游戏宿主的平台仍然关闭。
+  bool get serverResourceDownloadSupported =>
+      Platform.isAndroid || isDesktopPlatform;
 
   /// Page a user opens in a browser to issue a device token.
   String get deviceTokenUrl {
@@ -265,6 +268,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       final snapshot = await _remoteResourceService.fetchCloudSaves(
+        gameVersion: _playGameVersion(),
         token: token,
         baseUrl: base,
       );
@@ -312,6 +316,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       final versions = await _remoteResourceService.fetchSaveHistory(
+        gameVersion: _playGameVersion(),
         token: token,
         baseUrl: base,
         user: user,
@@ -399,6 +404,8 @@ class AppController extends ChangeNotifier {
   bool get cloudLoginInProgress => _cloudLogin.inProgress;
 
   /// Only the Android host embeds the sign-in screen.
+  /// 应用内 authentik 登录：Android 走原生 LoginActivity；
+  /// 桌面端目前通过「在浏览器打开令牌签发页」完成同一件事（见 deviceTokenUrl）。
   bool get cloudLoginSupported => Platform.isAndroid;
 
   /// Account name the server reported for the stored token, when verified.
@@ -1372,6 +1379,18 @@ class AppController extends ChangeNotifier {
     super.dispose();
   }
 
+  /// 当前游玩所用的游戏版本（存档按版本隔离用）。
+  ///
+  /// 本地形态用资源包版本；在线形态用**服务器当前那套资源**的版本，
+  /// 否则会用本地残留的旧版本号给存档分区，导致存档写错版本目录。
+  String _playGameVersion() {
+    if (playMode == PlayMode.online) {
+      final remote = _remoteManifest?.gameVersion?.trim() ?? '';
+      if (remote.isNotEmpty) return remote;
+    }
+    return (currentGameVersion ?? '').trim();
+  }
+
   /// 桌面端准备游戏：起本地服务器（本地资源 / 反代上游），返回要加载的地址。
   ///
   /// 两种形态都经过 [LocalResourceServer]，页面 origin 固定是 127.0.0.1，
@@ -1413,6 +1432,9 @@ class AppController extends ChangeNotifier {
       bridgeScript: bridge,
       upstream: mode == PlayMode.online ? Uri.parse('$base/') : null,
     );
+    if (mode == PlayMode.online) {
+      _startOnlineHeartbeat();
+    }
     _appLogger.emit(
       level: LogLevel.info,
       category: 'game.host',
@@ -1433,8 +1455,75 @@ class AppController extends ChangeNotifier {
     );
   }
 
+  Timer? _onlineHeartbeatTimer;
+
+  /// 在线游玩心跳：服务器据此判断「能否安全地切换资源版本」。
+  ///
+  /// 失败一律静默 —— 心跳只是给服务端做更新的让路判断，
+  /// 不能因为网络抖动让玩家进不去游戏。
+  Future<void> _onlineHeartbeat() async {
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) return;
+    final deviceId = _appSettings.deviceAccount.trim().isEmpty
+        ? 'launcher'
+        : _appSettings.deviceAccount.trim();
+    final body = jsonEncode(<String, Object?>{
+      'gameVersion': _playGameVersion(),
+      'device': {'id': deviceId, 'label': Platform.operatingSystem},
+    });
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    try {
+      final request = await client.postUrl(Uri.parse('$base/_save/app/online/enter'));
+      request.headers.contentType = ContentType.json;
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      request.add(utf8.encode(body));
+      final response = await request.close();
+      await response.drain<void>();
+    } catch (_) {
+      // 静默：心跳失败不影响游玩
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  void _startOnlineHeartbeat() {
+    _onlineHeartbeatTimer?.cancel();
+    unawaited(_onlineHeartbeat());
+    _onlineHeartbeatTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => unawaited(_onlineHeartbeat()),
+    );
+  }
+
+  Future<void> _stopOnlineHeartbeat() async {
+    _onlineHeartbeatTimer?.cancel();
+    _onlineHeartbeatTimer = null;
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) return;
+    final deviceId = _appSettings.deviceAccount.trim().isEmpty
+        ? 'launcher'
+        : _appSettings.deviceAccount.trim();
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    try {
+      final request = await client.postUrl(Uri.parse('$base/_save/app/online/leave'));
+      request.headers.contentType = ContentType.json;
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      request.add(utf8.encode(jsonEncode(<String, Object?>{
+        'device': {'id': deviceId},
+      })));
+      final response = await request.close();
+      await response.drain<void>();
+    } catch (_) {
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   /// 桌面端游戏窗口关闭后收尾。
   Future<void> finishDesktopGame(DesktopGameLaunch launch) async {
+    await _stopOnlineHeartbeat();
     await launch.server.stop();
     _appLogger.emit(
       level: LogLevel.info,
@@ -2650,6 +2739,9 @@ class AppController extends ChangeNotifier {
         ..write(_jsStringLiteral(base))
         ..write(',token:')
         ..write(_jsStringLiteral(token))
+        // 存档按游戏版本隔离：注入当前资源包版本，注入脚本据此分区
+        ..write(',gameVersion:')
+        ..write(_jsStringLiteral(_playGameVersion()))
         ..write('};\n')
         ..write(escapeDocumentStartScript(script));
       if (panel.isNotEmpty) {
