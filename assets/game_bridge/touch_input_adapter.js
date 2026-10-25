@@ -188,7 +188,8 @@
           current.id === "pvz-admin-fab" ||
           current.id === "pvz-admin-bar" ||
           current.id === "pvz-version-bar" ||
-          current.id === "pvz-conflict-bar") {
+          current.id === "pvz-conflict-bar" ||
+          current.id === "pvz-conflict-modal") {
         return true;
       }
       const className = typeof current.className === "string"
