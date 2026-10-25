@@ -421,3 +421,44 @@
 ### 遗留
 - 21:9 游戏画面若仍被裁切，需确认「画面比例」设置（默认均衡 = 17:9 视口）。
 - 真机复测：进游戏确认右下角为「存档」，面板能列出版本/历史并回滚。
+
+## R-20261025-01（hlh.21/22 21:9 与桌面宿主）/ orchestrator(opencode) / 2026-10-25T16:35+08:00
+
+- status: review
+- 版本: `0.9.0-hlh.20+90020` → `0.9.0-hlh.21+90021` → `0.9.0-hlh.22+90022`
+  （.21 发布后发现 Windows 主界面仍有一个桌面宿主异常，.22 一并修复并替代）
+
+### 现象 → 根因 → 改法 → 断言
+
+#### 21:9 画面被裁切 / 强制 16:9（P0）
+- **根因**：`GameViewportSize.fit` 对 `BALANCED` 把视口夹在 16:10–17:9，
+  21:9 手机拿不到真实比例。
+- **改法**：`BALANCED` 直接返回窗口宽高（原生比例）；`SHOW_ALL` 保留 17:9、
+  `STRETCH` 保留原行为。设置项文案改为「跟随屏幕」。
+- **断言**：`GameViewportSizeTest` 4 项（4:3 / 16:9 / 20:9 / 21:9 原样返回）。
+
+#### Windows「游戏」页抛 Unsupported operation（P0）
+- **根因**：`GameHostPlatform.current()` 只枚举 android/ios/ohos；Windows 的
+  `_Hero` 构建时调用 `nativeHostName`，直接抛 `UnsupportedError`。
+- **改法**：枚举增加 `desktop`（`dart-desktop`，本地 HTTP + webview_cef），
+  windows/linux/macos 映射到它；原生活会话路径不变。
+- **断言**：`check_game_host_contract.dart` +4 条（Windows/Android 映射、
+  展示名、未知平台报错）；Windows 实机启动 stderr 不再出现该异常。
+
+#### 21:9 启动器/面板布局（P1，@designer）
+- 侧边栏短屏收窄 + 滚动；开始页短屏整体滚动；存档页双栏（窄屏单列）；
+  游戏内面板 ≤540px 全屏、触控目标 ≥40px。
+- 验证：`flutter analyze` 干净；5 套 191 项全绿；`node --check ui.js`。
+
+### 验证（实测）
+- 客户端 191 项、服务端 173 项，合计 **364 通过 / 0 失败**
+- Windows 启动：`exited=False`，无 `Unsupported operation`，无未捕获异常
+- 更新通道：APK/Windows 清单 200，latest=90022，size/sha 与磁盘一致
+- Release：`v0.9.0-hlh.22` 两个资产 uploaded
+
+### 产物
+- APK 58,634,588 B `d7e36a690a6712bbccb728ec7a1f6ad35f1207bd7499f9de8cd16ee737fb857b`
+- Windows zip 190,021,461 B `20a90b2cd541ebe0c76fbc9f6bf2fbe3aa2832274756d10b8309b1e22f20a220`
+
+### 遗留
+- 真机复核：21:9 进游戏确认铺满且不裁切；存档页滚到底部；面板可操作。

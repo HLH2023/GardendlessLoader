@@ -1,61 +1,7 @@
-import 'dart:io';
-
 import 'package:flutter/services.dart';
 
-enum GameHostPlatform {
-  android('android', 'https://appassets.androidplatform.net'),
-  ios('ios', 'gardendless-game://localhost'),
-  ohos('ohos', 'https://gardendless.invalid');
-
-  const GameHostPlatform(this.wireName, this.origin);
-
-  final String wireName;
-  final String origin;
-
-  String get nativeHostName => '$wireName-native';
-
-  static GameHostPlatform current() {
-    final value = Platform.operatingSystem;
-    return GameHostPlatform.values.firstWhere(
-      (platform) => platform.wireName == value,
-      orElse: () => throw UnsupportedError(
-        'Gardendless native GameHost does not support $value',
-      ),
-    );
-  }
-
-  static GameHostPlatform fromWireName(Object? value) {
-    return GameHostPlatform.values.firstWhere(
-      (platform) => platform.wireName == value,
-      orElse: () => throw FormatException(
-        'Unsupported native GameHost platform: $value',
-      ),
-    );
-  }
-}
-
-/// How the game viewport fits the screen. The game shows 16:10 to 17:9 without
-/// distortion and its whole picture at 17:9. The names are the native session
-/// wire values.
-enum ScreenFit {
-  /// Clamps the viewport to 16:10–17:9: trims some of the picture for
-  /// smaller black bars.
-  balanced,
-
-  /// Keeps the viewport at 17:9 so the whole picture shows, with larger
-  /// black bars.
-  showAll,
-
-  /// Stretches the balanced viewport over the whole screen.
-  stretch;
-
-  static ScreenFit fromName(Object? value) {
-    return ScreenFit.values.firstWhere(
-      (fit) => fit.name == value,
-      orElse: () => ScreenFit.balanced,
-    );
-  }
-}
+export 'game_host_platform.dart';
+import 'game_host_platform.dart';
 
 /// 游戏会话形态：本地资源包 / 在线（安卓端从服务器拉游戏页）。
 enum GameSessionMode {

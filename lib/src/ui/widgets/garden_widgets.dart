@@ -31,15 +31,28 @@ class TwoColumn extends StatelessWidget {
       builder: (context, constraints) {
         if (constraints.maxWidth < breakpoint) {
           return ListView(
+            padding: EdgeInsets.only(bottom: gap),
             children: [...left, SizedBox(height: gap), ...right],
           );
         }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(flex: leftFlex, child: ListView(children: left)),
+            Expanded(
+              flex: leftFlex,
+              child: ListView(
+                padding: EdgeInsets.only(bottom: gap),
+                children: left,
+              ),
+            ),
             SizedBox(width: gap),
-            Expanded(flex: rightFlex, child: ListView(children: right)),
+            Expanded(
+              flex: rightFlex,
+              child: ListView(
+                padding: EdgeInsets.only(bottom: gap),
+                children: right,
+              ),
+            ),
           ],
         );
       },

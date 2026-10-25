@@ -52,112 +52,106 @@ class _SavesPageState extends State<SavesPage> {
         final strings = context.strings;
         final snapshot = controller.cloudSaves;
         final configured = controller.cloudServerConfigured;
-        return SingleChildScrollView(
-          padding: EdgeInsets.symmetric(
-            horizontal: widget.compact ? 16 : 28,
-            vertical: widget.compact ? 16 : 24,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+
+        if (!configured) {
+          return ListView(
             children: [
-              Text(
-                strings.savesTitle,
-                style: GardenType.title(22, color: palette.ink),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                strings.savesSubtitle,
-                style: TextStyle(
-                  color: palette.inkMuted,
-                  fontSize: 13,
-                  height: 1.5,
+              _Notice(
+                text: strings.savesNotConfigured,
+                color: palette.warning,
+                action: GardenButton(
+                  label: strings.navSettings,
+                  icon: Icons.settings_outlined,
+                  compact: true,
+                  onPressed: () =>
+                      widget.actions.navigate(LauncherDestination.settings),
                 ),
+                compact: widget.compact,
               ),
-              const SizedBox(height: 18),
-              if (!configured)
-                _Notice(
-                  text: strings.savesNotConfigured,
-                  color: palette.warning,
-                  action: GardenButton(
-                    label: strings.navSettings,
-                    icon: Icons.settings_outlined,
-                    compact: true,
-                    onPressed: () =>
-                        widget.actions.navigate(LauncherDestination.settings),
-                  ),
-                )
-              else ...[
-                _SummaryCard(controller: controller),
-                const SizedBox(height: 14),
-                _Notice(
-                  text: strings.savesUploadHint,
-                  color: palette.inkMuted,
-                ),
-                const SizedBox(height: 14),
-                if (controller.cloudSavesError != null)
-                  _Notice(
-                    text: _errorText(strings, controller.cloudSavesError!),
-                    color: palette.danger,
-                    action: GardenButton(
-                      label: strings.savesRefresh,
-                      icon: Icons.refresh,
-                      compact: true,
-                      onPressed: controller.refreshCloudSaves,
-                    ),
-                  )
-                else if (snapshot == null)
-                  _Notice(
-                    text: controller.cloudSavesLoading
-                        ? strings.checking
-                        : strings.savesLoadFailed,
-                    color: palette.inkMuted,
-                  )
-                else if (snapshot.entries.isEmpty)
-                  _Notice(
-                    text: strings.savesEmpty,
-                    color: palette.inkMuted,
-                    action: GardenButton(
-                      label: strings.savesRefresh,
-                      icon: Icons.refresh,
-                      compact: true,
-                      onPressed: controller.refreshCloudSaves,
-                    ),
-                  )
-                else
-                  for (final entry in snapshot.entries) ...[
-                    _SaveEntryCard(
-                      controller: controller,
-                      entry: entry,
-                      // 页面只展示当前账号；服务端已允许本人查看历史与回滚，
-                      // 不再要求 authentik Admins 组。
-                      canManage: true,
-                      expanded: _expanded.contains(entry.key),
-                      onToggleHistory: () {
-                        setState(() {
-                          if (_expanded.remove(entry.key)) return;
-                          _expanded.add(entry.key);
-                        });
-                        if (_expanded.contains(entry.key)) {
-                          controller.loadSaveHistory(entry.key);
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                if (controller.saveRestoreMessage != null) ...[
-                  const SizedBox(height: 4),
-                  _Notice(
-                    text: controller.saveRestoreMessage == 'save_restore_done'
-                        ? strings.savesRestoreDone
-                        : strings.savesRestoreFailed,
-                    color: controller.saveRestoreMessage == 'save_restore_done'
-                        ? palette.accent
-                        : palette.danger,
-                  ),
-                ],
-              ],
             ],
-          ),
+          );
+        }
+
+        return TwoColumn(
+          gap: widget.compact ? 14 : 20,
+          breakpoint: 560,
+          left: [
+            _SummaryCard(controller: controller, compact: widget.compact),
+            SizedBox(height: widget.compact ? 10 : 14),
+            _Notice(
+              text: strings.savesUploadHint,
+              color: palette.inkMuted,
+              compact: widget.compact,
+            ),
+            if (controller.saveRestoreMessage != null) ...[
+              SizedBox(height: widget.compact ? 8 : 12),
+              _Notice(
+                text: controller.saveRestoreMessage == 'save_restore_done'
+                    ? strings.savesRestoreDone
+                    : strings.savesRestoreFailed,
+                color: controller.saveRestoreMessage == 'save_restore_done'
+                    ? palette.accent
+                    : palette.danger,
+                compact: widget.compact,
+              ),
+            ],
+          ],
+          right: [
+            if (controller.cloudSavesError != null)
+              _Notice(
+                text: _errorText(strings, controller.cloudSavesError!),
+                color: palette.danger,
+                action: GardenButton(
+                  label: strings.savesRefresh,
+                  icon: Icons.refresh,
+                  compact: true,
+                  onPressed: controller.refreshCloudSaves,
+                ),
+                compact: widget.compact,
+              )
+            else if (snapshot == null)
+              _Notice(
+                text: controller.cloudSavesLoading
+                    ? strings.checking
+                    : strings.savesLoadFailed,
+                color: palette.inkMuted,
+                compact: widget.compact,
+              )
+            else if (snapshot.entries.isEmpty)
+              _Notice(
+                text: strings.savesEmpty,
+                color: palette.inkMuted,
+                action: GardenButton(
+                  label: strings.savesRefresh,
+                  icon: Icons.refresh,
+                  compact: true,
+                  onPressed: controller.refreshCloudSaves,
+                ),
+                compact: widget.compact,
+              )
+            else
+              for (final entry in snapshot.entries) ...[
+                _SaveEntryCard(
+                  controller: controller,
+                  entry: entry,
+                  // 页面只展示当前账号；服务端已允许本人查看历史与回滚，
+                  // 不再要求 authentik Admins 组。
+                  canManage: true,
+                  expanded: _expanded.contains(entry.key),
+                  compact: widget.compact,
+                  onToggleHistory: () {
+                    setState(() {
+                      if (_expanded.remove(entry.key)) return;
+                      _expanded.add(entry.key);
+                    });
+                    if (_expanded.contains(entry.key)) {
+                      controller.loadSaveHistory(entry.key);
+                    }
+                  },
+                ),
+                SizedBox(height: widget.compact ? 8 : 12),
+              ],
+          ],
         );
       },
     );
@@ -171,9 +165,10 @@ class _SavesPageState extends State<SavesPage> {
 }
 
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.controller});
+  const _SummaryCard({required this.controller, this.compact = false});
 
   final AppController controller;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -184,6 +179,7 @@ class _SummaryCard extends StatelessWidget {
         ? snapshot!.user
         : controller.cloudAccount;
     return SurfaceCard(
+      padding: EdgeInsets.all(compact ? 14 : 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -196,11 +192,12 @@ class _SummaryCard extends StatelessWidget {
               tone: GardenButtonTone.ghost,
               compact: true,
               busy: controller.cloudSavesLoading,
-              onPressed:
-                  controller.cloudSavesLoading ? null : controller.refreshCloudSaves,
+              onPressed: controller.cloudSavesLoading
+                  ? null
+                  : controller.refreshCloudSaves,
             ),
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: compact ? 10 : 14),
           MetricRow(
             metrics: [
               Metric(
@@ -215,7 +212,7 @@ class _SummaryCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: compact ? 8 : 10),
           InfoRow(
             label: strings.savesTotalSize,
             value: snapshot == null
@@ -223,10 +220,14 @@ class _SummaryCard extends StatelessWidget {
                 : '${_formatBytes(snapshot.totalBytes)} · '
                     '${snapshot.entries.length} ${strings.savesEntryCount}',
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: compact ? 6 : 8),
           Text(
             strings.savesSubtitle,
-            style: TextStyle(color: palette.inkFaint, fontSize: 11.5, height: 1.5),
+            style: TextStyle(
+              color: palette.inkFaint,
+              fontSize: 11.5,
+              height: 1.45,
+            ),
           ),
         ],
       ),
@@ -241,6 +242,7 @@ class _SaveEntryCard extends StatelessWidget {
     required this.canManage,
     required this.expanded,
     required this.onToggleHistory,
+    this.compact = false,
   });
 
   final AppController controller;
@@ -250,13 +252,15 @@ class _SaveEntryCard extends StatelessWidget {
   final bool canManage;
   final bool expanded;
   final VoidCallback onToggleHistory;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.garden;
     final strings = context.strings;
     final summaryBits = <String>[
-      if (entry.playerName != null) '${strings.savesPlayer} ${entry.playerName}',
+      if (entry.playerName != null)
+        '${strings.savesPlayer} ${entry.playerName}',
       if (entry.coin != null) '${strings.savesCoin} ${entry.coin}',
       if (entry.gem != null) '${strings.savesGem} ${entry.gem}',
       if (entry.world != null) '${strings.savesWorld} ${entry.world}',
@@ -265,6 +269,7 @@ class _SaveEntryCard extends StatelessWidget {
     final loading = controller.saveHistoryLoading.contains(entry.key);
     final historyError = controller.saveHistoryError;
     return SurfaceCard(
+      padding: EdgeInsets.all(compact ? 14 : 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -273,8 +278,9 @@ class _SaveEntryCard extends StatelessWidget {
             icon: Icons.save_outlined,
             trailing: canManage
                 ? GardenButton(
-                    label:
-                        expanded ? strings.savesHistoryHide : strings.savesHistory,
+                    label: expanded
+                        ? strings.savesHistoryHide
+                        : strings.savesHistory,
                     icon: expanded ? Icons.expand_less : Icons.history,
                     tone: GardenButtonTone.ghost,
                     compact: true,
@@ -282,10 +288,12 @@ class _SaveEntryCard extends StatelessWidget {
                   )
                 : null,
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: compact ? 8 : 12),
           MetricRow(
             metrics: [
-              Metric(label: strings.savesTotalSize, value: _formatBytes(entry.bytes)),
+              Metric(
+                  label: strings.savesTotalSize,
+                  value: _formatBytes(entry.bytes)),
               Metric(
                 label: strings.savesLastSync,
                 value: entry.mtime == 0 ? '--' : _formatTime(entry.mtime),
@@ -293,20 +301,26 @@ class _SaveEntryCard extends StatelessWidget {
             ],
           ),
           if (entry.deviceLabel.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            SizedBox(height: compact ? 6 : 8),
             Text(
               '${strings.savesWrittenBy} ${entry.deviceLabel}',
-              style: TextStyle(color: palette.inkFaint, fontSize: 12),
+              style: TextStyle(
+                color: palette.inkFaint,
+                fontSize: compact ? 11.5 : 12,
+              ),
             ),
           ],
           if (summaryBits.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            SizedBox(height: compact ? 8 : 10),
             Text(
               summaryBits.join(' · '),
-              style: TextStyle(color: palette.inkMuted, fontSize: 12.5),
+              style: TextStyle(
+                color: palette.inkMuted,
+                fontSize: compact ? 12 : 12.5,
+              ),
             ),
           ] else ...[
-            const SizedBox(height: 10),
+            SizedBox(height: compact ? 8 : 10),
             Text(
               entry.key,
               style: TextStyle(
@@ -317,16 +331,17 @@ class _SaveEntryCard extends StatelessWidget {
             ),
           ],
           if (!canManage) ...[
-            const SizedBox(height: 8),
+            SizedBox(height: compact ? 6 : 8),
             Text(
               strings.savesHistoryForbidden,
-              style: TextStyle(color: palette.inkFaint, fontSize: 11.5, height: 1.5),
+              style: TextStyle(
+                  color: palette.inkFaint, fontSize: 11.5, height: 1.5),
             ),
           ],
           if (expanded && canManage) ...[
-            const SizedBox(height: 12),
+            SizedBox(height: compact ? 8 : 12),
             Divider(color: palette.border),
-            const SizedBox(height: 8),
+            SizedBox(height: compact ? 6 : 8),
             if (loading)
               Text(
                 strings.checking,
@@ -335,7 +350,8 @@ class _SaveEntryCard extends StatelessWidget {
             else if (historyError == 'save_token_rejected')
               Text(
                 strings.savesHistoryForbidden,
-                style: TextStyle(color: palette.warning, fontSize: 12.5, height: 1.5),
+                style: TextStyle(
+                    color: palette.warning, fontSize: 12.5, height: 1.5),
               )
             else if (versions == null || versions.isEmpty)
               Text(
@@ -349,6 +365,7 @@ class _SaveEntryCard extends StatelessWidget {
                   version: version,
                   busy: controller.saveRestoreInProgress == entry.key,
                   onRestore: () => _confirmRestore(context, version),
+                  compact: compact,
                 ),
           ],
         ],
@@ -402,11 +419,13 @@ class _VersionRow extends StatelessWidget {
     required this.version,
     required this.busy,
     required this.onRestore,
+    this.compact = false,
   });
 
   final CloudSaveVersion version;
   final bool busy;
   final VoidCallback onRestore;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -419,15 +438,19 @@ class _VersionRow extends StatelessWidget {
       if (version.playerName != null) version.playerName!,
     ];
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.only(bottom: compact ? 6 : 8),
       child: Row(
         children: [
           Expanded(
             child: Text(
               parts.join(' · '),
-              style: TextStyle(color: palette.inkMuted, fontSize: 12),
+              style: TextStyle(
+                color: palette.inkMuted,
+                fontSize: compact ? 11.5 : 12,
+              ),
             ),
           ),
+          const SizedBox(width: 8),
           GardenButton(
             label: strings.savesRestore,
             tone: GardenButtonTone.ghost,
@@ -442,16 +465,23 @@ class _VersionRow extends StatelessWidget {
 }
 
 class _Notice extends StatelessWidget {
-  const _Notice({required this.text, required this.color, this.action});
+  const _Notice({
+    required this.text,
+    required this.color,
+    this.action,
+    this.compact = false,
+  });
 
   final String text;
   final Color color;
   final Widget? action;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.garden;
     return SurfaceCard(
+      padding: EdgeInsets.all(compact ? 12 : 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -460,7 +490,11 @@ class _Notice extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: TextStyle(color: palette.inkMuted, fontSize: 12.5, height: 1.6),
+              style: TextStyle(
+                color: palette.inkMuted,
+                fontSize: compact ? 12 : 12.5,
+                height: 1.5,
+              ),
             ),
           ),
           if (action != null) ...[const SizedBox(width: 10), action!],

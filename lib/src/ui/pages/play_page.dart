@@ -39,7 +39,7 @@ class _PlayPageState extends State<PlayPage> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
-    final gap = widget.compact ? 20.0 : 32.0;
+    final gap = widget.compact ? 12.0 : 32.0;
     final ready = controller.canStartGame;
     final hero = _Hero(controller: controller, compact: widget.compact);
     final actionBar = _ActionBar(
@@ -50,7 +50,11 @@ class _PlayPageState extends State<PlayPage> {
     );
     return LayoutBuilder(
       builder: (context, constraints) {
-        final modeCard = PlayModeCard(controller: controller, actions: widget.actions);
+        final modeCard = PlayModeCard(
+          controller: controller,
+          actions: widget.actions,
+          compact: widget.compact,
+        );
         if (constraints.maxWidth < 560) {
           return ListView(
             children: [
@@ -63,27 +67,36 @@ class _PlayPageState extends State<PlayPage> {
           );
         }
         // Launcher composition: the key art owns the open area, the title
-        // sits bottom-left on the same row as the primary action.
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Spacer(),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(child: hero),
-                const SizedBox(width: 16),
-                actionBar,
-              ],
+        // sits bottom-left on the same row as the primary action. On short
+        // displays (e.g. 21:9 phones) this scrolls rather than clipping.
+        return SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: IntrinsicHeight(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Spacer(),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(child: hero),
+                      const SizedBox(width: 16),
+                      actionBar,
+                    ],
+                  ),
+                  SizedBox(height: gap),
+                  // 形态切换 + 全局账号：两种形态共用同一存档通路，登录态也只有一份
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: modeCard,
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
             ),
-            SizedBox(height: gap),
-            // 形态切换 + 全局账号：两种形态共用同一存档通路，登录态也只有一份
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 640),
-              child: modeCard,
-            ),
-            const SizedBox(height: 8),
-          ],
+          ),
         );
       },
     );
@@ -122,27 +135,34 @@ class _Hero extends StatelessWidget {
           label: ready ? strings.resourcesReady : strings.resourcesNeeded,
           color: ready ? palette.accent : palette.warning,
         ),
-        SizedBox(height: compact ? 12 : 16),
+        SizedBox(height: compact ? 6 : 16),
         Text(
           ready
               ? displayGameTitle(controller.detectedTitle)
               : 'PvZ2 Gardendless',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: GardenType.title(compact ? 34 : 46, color: palette.ink),
+          style: GardenType.title(compact ? 28 : 46, color: palette.ink),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: compact ? 6 : 10),
         Text(
           ready ? details.join('  ·  ') : strings.importToPlayHint,
-          style: TextStyle(color: palette.inkMuted, fontSize: 14, height: 1.5),
+          style: TextStyle(
+            color: palette.inkMuted,
+            fontSize: compact ? 13 : 14,
+            height: 1.4,
+          ),
         ),
         if (ready && lastPlayedAt != null)
           Text(
             '${strings.lastPlayed(lastPlayedAt, Duration(milliseconds: journal.lastPlayMs))}'
             '  ·  ${strings.totalPlayed(Duration(milliseconds: journal.totalPlayMs))}',
             key: const ValueKey('last-played'),
-            style:
-                TextStyle(color: palette.inkFaint, fontSize: 13, height: 1.5),
+            style: TextStyle(
+              color: palette.inkFaint,
+              fontSize: compact ? 12 : 13,
+              height: 1.4,
+            ),
           ),
       ],
     );

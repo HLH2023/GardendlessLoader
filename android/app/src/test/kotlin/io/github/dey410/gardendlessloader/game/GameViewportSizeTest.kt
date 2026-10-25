@@ -5,22 +5,18 @@ import org.junit.Test
 
 class GameViewportSizeTest {
     @Test
-    fun `square-ish windows are limited to 16 by 10`() {
-        assertEquals(1600 to 1000, GameViewportSize.fit(1600, 1200, GameScreenFit.BALANCED))
-        assertEquals(1400 to 875, GameViewportSize.fit(1400, 1000, GameScreenFit.BALANCED))
-    }
-
-    @Test
-    fun `supported aspect ratios fill the window`() {
+    fun `balanced follows the window exactly on 4 by 3 and 16 by 9`() {
+        assertEquals(1600 to 1200, GameViewportSize.fit(1600, 1200, GameScreenFit.BALANCED))
+        assertEquals(1400 to 1000, GameViewportSize.fit(1400, 1000, GameScreenFit.BALANCED))
         assertEquals(1600 to 1000, GameViewportSize.fit(1600, 1000, GameScreenFit.BALANCED))
         assertEquals(1920 to 1080, GameViewportSize.fit(1920, 1080, GameScreenFit.BALANCED))
-        assertEquals(1700 to 900, GameViewportSize.fit(1700, 900, GameScreenFit.BALANCED))
     }
 
     @Test
-    fun `ultrawide windows are limited to 17 by 9`() {
-        assertEquals(2040 to 1080, GameViewportSize.fit(2400, 1080, GameScreenFit.BALANCED))
-        assertEquals(1700 to 900, GameViewportSize.fit(2100, 900, GameScreenFit.BALANCED))
+    fun `balanced does not crop or letterbox 21 by 9 phones`() {
+        assertEquals(2400 to 1080, GameViewportSize.fit(2400, 1080, GameScreenFit.BALANCED))
+        assertEquals(2100 to 900, GameViewportSize.fit(2100, 900, GameScreenFit.BALANCED))
+        assertEquals(2340 to 1080, GameViewportSize.fit(2340, 1080, GameScreenFit.BALANCED))
     }
 
     @Test

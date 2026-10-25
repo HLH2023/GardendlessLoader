@@ -203,9 +203,9 @@ class _HomePageState extends State<HomePage> {
           child: Padding(
             padding: EdgeInsets.fromLTRB(
               gutter,
-              compact ? 14 : 24,
+              compact ? 12 : 24,
               padding.right + gutter,
-              padding.bottom + (compact ? 12 : 20),
+              padding.bottom + (compact ? 10 : 20),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -216,7 +216,7 @@ class _HomePageState extends State<HomePage> {
                   compact: compact,
                   onOpenAnnouncement: _openAnnouncement,
                 ),
-                SizedBox(height: compact ? 14 : 24),
+                SizedBox(height: compact ? 10 : 24),
                 Expanded(
                   child: AnimatedSwitcher(
                     duration: reduced ? Duration.zero : GardenMotion.quick,
@@ -536,7 +536,8 @@ class _HomePageState extends State<HomePage> {
       try {
         launch = await _controller.prepareDesktopGame();
       } catch (error) {
-        _toast(strings.cannotStartGame('$error'), code: 'game_host_launch_failed');
+        _toast(strings.cannotStartGame('$error'),
+            code: 'game_host_launch_failed');
         return;
       }
       if (!mounted) {
@@ -653,9 +654,9 @@ class _Sidebar extends StatelessWidget {
           width: widthFor(leftInset: leftInset, compact: compact),
           padding: EdgeInsets.fromLTRB(
             leftInset + 10,
-            compact ? 14 : 24,
+            compact ? 10 : 24,
             10,
-            compact ? 12 : 20,
+            compact ? 8 : 20,
           ),
           decoration: BoxDecoration(
             color:
@@ -664,54 +665,57 @@ class _Sidebar extends StatelessWidget {
               right: BorderSide(color: palette.border.withValues(alpha: 0.25)),
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Pressable(
-                  key: const ValueKey('launcher-icon'),
-                  onTap: onIconTap,
-                  scale: 0.9,
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(compact ? 9 : 11),
-                        child: Image.asset(
-                          _appIconAsset,
-                          width: compact ? 36 : 42,
-                          height: compact ? 36 : 42,
-                          cacheWidth: 128,
-                          semanticLabel: 'GardendlessLoader',
-                        ),
-                      ),
-                      if (badge != null)
-                        Positioned(
-                          key: const ValueKey('seasonal-badge'),
-                          right: -7,
-                          bottom: -7,
-                          child: Text(
-                            badge,
-                            style: const TextStyle(fontSize: 16, height: 1),
+          child: SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Pressable(
+                    key: const ValueKey('launcher-icon'),
+                    onTap: onIconTap,
+                    scale: 0.9,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(compact ? 8 : 11),
+                          child: Image.asset(
+                            _appIconAsset,
+                            width: compact ? 32 : 42,
+                            height: compact ? 32 : 42,
+                            cacheWidth: 128,
+                            semanticLabel: 'GardendlessLoader',
                           ),
                         ),
-                    ],
+                        if (badge != null)
+                          Positioned(
+                            key: const ValueKey('seasonal-badge'),
+                            right: -7,
+                            bottom: -7,
+                            child: Text(
+                              badge,
+                              style: const TextStyle(fontSize: 16, height: 1),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              SizedBox(height: compact ? 16 : 28),
-              for (final destination in LauncherDestination.values)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: _SidebarItem(
-                    destination: destination,
-                    selected: destination == selected,
-                    compact: compact,
-                    badge: _badgeFor(destination),
-                    onTap: () => onSelected(destination),
+                SizedBox(height: compact ? 10 : 28),
+                for (final destination in LauncherDestination.values)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: compact ? 2 : 4),
+                    child: _SidebarItem(
+                      destination: destination,
+                      selected: destination == selected,
+                      compact: compact,
+                      badge: _badgeFor(destination),
+                      onTap: () => onSelected(destination),
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -772,10 +776,10 @@ class _SidebarItem extends StatelessWidget {
         semanticLabel: destination.label(context.strings),
         scale: 0.95,
         child: Container(
-          height: compact ? 52 : 60,
+          height: compact ? 46 : 60,
           decoration: BoxDecoration(
             color: selected ? palette.surfaceMuted : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
           ),
           child: Stack(
             alignment: Alignment.center,
@@ -785,22 +789,26 @@ class _SidebarItem extends StatelessWidget {
                 children: [
                   Icon(
                     selected ? destination.selectedIcon : destination.icon,
-                    size: 21,
+                    size: compact ? 19 : 21,
                     color: color,
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: compact ? 2 : 4),
                   Text(
                     destination.label(context.strings),
                     style: TextStyle(
                       color: color,
-                      fontSize: 11.5,
+                      fontSize: compact ? 11 : 11.5,
                       fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                     ),
                   ),
                 ],
               ),
               if (badge != null)
-                Positioned(top: 8, right: compact ? 12 : 16, child: badge!),
+                Positioned(
+                  top: compact ? 6 : 8,
+                  right: compact ? 8 : 16,
+                  child: badge!,
+                ),
             ],
           ),
         ),
@@ -842,7 +850,7 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.garden;
     return SizedBox(
-      height: 40,
+      height: compact ? 36 : 40,
       child: LayoutBuilder(
         builder: (context, constraints) => Row(
           children: [
@@ -850,7 +858,7 @@ class _TopBar extends StatelessWidget {
               child: Text(
                 destination.label(context.strings),
                 key: const ValueKey('page-title'),
-                style: GardenType.title(compact ? 24 : 28, color: palette.ink),
+                style: GardenType.title(compact ? 22 : 28, color: palette.ink),
               ),
             ),
             // The game version lives on the home and resources pages; the

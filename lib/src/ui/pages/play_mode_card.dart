@@ -13,10 +13,16 @@ import '../widgets/garden_widgets.dart';
 /// 两种形态共用同一个本地服务器与同一份存档桥，所以这里只切换「资源从哪来」；
 /// 登录态是启动器级别的（云存档 / 资源下载 / 在线游玩 / 存档管理共用一份令牌）。
 class PlayModeCard extends StatelessWidget {
-  const PlayModeCard({super.key, required this.controller, required this.actions});
+  const PlayModeCard({
+    super.key,
+    required this.controller,
+    required this.actions,
+    this.compact = false,
+  });
 
   final AppController controller;
   final LauncherActions actions;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -29,6 +35,10 @@ class PlayModeCard extends StatelessWidget {
         controller.gameLaunchInFlight;
 
     return SurfaceCard(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 16 : 20,
+        vertical: compact ? 12 : 20,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -36,25 +46,37 @@ class PlayModeCard extends StatelessWidget {
             strings.playModeTitle,
             style: TextStyle(
               color: palette.ink,
-              fontSize: 15,
+              fontSize: compact ? 14 : 15,
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: compact ? 8 : 12),
           SegmentedButton<PlayMode>(
             segments: [
-              ButtonSegment(value: PlayMode.local, label: Text(strings.playModeLocal)),
-              ButtonSegment(value: PlayMode.online, label: Text(strings.playModeOnline)),
+              ButtonSegment(
+                value: PlayMode.local,
+                label: Text(strings.playModeLocal),
+              ),
+              ButtonSegment(
+                value: PlayMode.online,
+                label: Text(strings.playModeOnline),
+              ),
             ],
             selected: {mode},
             onSelectionChanged: busy
                 ? null
                 : (selection) => controller.setPlayMode(selection.first),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: compact ? 6 : 10),
           Text(
-            mode == PlayMode.local ? strings.playModeLocalHint : strings.playModeOnlineHint,
-            style: TextStyle(color: palette.inkMuted, fontSize: 12.5, height: 1.5),
+            mode == PlayMode.local
+                ? strings.playModeLocalHint
+                : strings.playModeOnlineHint,
+            style: TextStyle(
+              color: palette.inkMuted,
+              fontSize: compact ? 12 : 12.5,
+              height: 1.45,
+            ),
           ),
           if (mode == PlayMode.local && !controller.hasCurrentResource)
             Padding(
@@ -74,10 +96,14 @@ class PlayModeCard extends StatelessWidget {
                 style: TextStyle(color: palette.danger, fontSize: 12.5),
               ),
             ),
-          const SizedBox(height: 18),
+          SizedBox(height: compact ? 12 : 18),
           Divider(color: palette.border, height: 1),
-          const SizedBox(height: 14),
-          _AccountRow(controller: controller, actions: actions),
+          SizedBox(height: compact ? 10 : 14),
+          _AccountRow(
+            controller: controller,
+            actions: actions,
+            compact: compact,
+          ),
         ],
       ),
     );
@@ -85,10 +111,15 @@ class PlayModeCard extends StatelessWidget {
 }
 
 class _AccountRow extends StatelessWidget {
-  const _AccountRow({required this.controller, required this.actions});
+  const _AccountRow({
+    required this.controller,
+    required this.actions,
+    this.compact = false,
+  });
 
   final AppController controller;
   final LauncherActions actions;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -103,30 +134,43 @@ class _AccountRow extends StatelessWidget {
           children: [
             Icon(
               signedIn ? Icons.verified_user_outlined : Icons.person_outline,
-              size: 18,
+              size: compact ? 16 : 18,
               color: signedIn ? palette.accent : palette.inkMuted,
             ),
             const SizedBox(width: 8),
             Text(
               strings.accountTitle,
-              style: TextStyle(color: palette.ink, fontSize: 14, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: palette.ink,
+                fontSize: compact ? 13.5 : 14,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                signedIn ? '${strings.accountSignedInAs} $account' : strings.accountSignedOut,
-                style: TextStyle(color: palette.inkMuted, fontSize: 12.5),
+                signedIn
+                    ? '${strings.accountSignedInAs} $account'
+                    : strings.accountSignedOut,
+                style: TextStyle(
+                  color: palette.inkMuted,
+                  fontSize: compact ? 12 : 12.5,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: compact ? 6 : 8),
         Text(
           strings.accountHint,
-          style: TextStyle(color: palette.inkMuted, fontSize: 12, height: 1.5),
+          style: TextStyle(
+            color: palette.inkMuted,
+            fontSize: compact ? 11.5 : 12,
+            height: 1.45,
+          ),
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: compact ? 8 : 12),
         Wrap(
           spacing: 10,
           runSpacing: 8,
@@ -152,7 +196,8 @@ class _AccountRow extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.login, size: 18),
-              label: Text(signedIn ? strings.accountReSignIn : strings.accountSignIn),
+              label: Text(
+                  signedIn ? strings.accountReSignIn : strings.accountSignIn),
             ),
             if (signedIn)
               OutlinedButton.icon(
@@ -160,7 +205,8 @@ class _AccountRow extends StatelessWidget {
                   await controller.signOutAccount();
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(context.strings.accountSignedOutDone)),
+                    SnackBar(
+                        content: Text(context.strings.accountSignedOutDone)),
                   );
                 },
                 icon: const Icon(Icons.logout, size: 18),

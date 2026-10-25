@@ -12,6 +12,7 @@
 import 'dart:io';
 
 import 'package:gardendless_loader/src/game_host/game_exit_result.dart';
+import 'package:gardendless_loader/src/game_host/game_host_platform.dart';
 import 'package:gardendless_loader/src/services/cloud_save_service.dart';
 import 'package:gardendless_loader/src/services/remote_resource_service.dart';
 
@@ -295,6 +296,29 @@ void main() {
           .readAsStringSync()
           .contains('canManage: snapshot.isAdmin'),
       null);
+
+  // Windows 没有原生 GameHost：界面/诊断必须回退到 Dart 桌面宿主，
+  // 否则 play_page 构建时直接抛 UnsupportedError（hlh.20 实测）。
+  check('Windows 映射到 Dart 桌面宿主',
+      GameHostPlatform.forOperatingSystem('windows') ==
+          GameHostPlatform.desktop,
+      null);
+  check('桌面宿主的展示名不是原生',
+      GameHostPlatform.desktop.nativeHostName == 'dart-desktop',
+      GameHostPlatform.desktop.nativeHostName);
+  check('Android/iOS/OHOS 仍映射到原生宿主',
+      GameHostPlatform.forOperatingSystem('android') ==
+              GameHostPlatform.android &&
+          GameHostPlatform.forOperatingSystem('ios') == GameHostPlatform.ios &&
+          GameHostPlatform.forOperatingSystem('ohos') == GameHostPlatform.ohos,
+      null);
+  var unknownPlatformThrew = false;
+  try {
+    GameHostPlatform.forOperatingSystem('plan9');
+  } on UnsupportedError {
+    unknownPlatformThrew = true;
+  }
+  check('未知平台明确报错而不是静默降级', unknownPlatformThrew, null);
 
   stdout.writeln('\n结果：$passed 通过 / $failed 失败');
   exit(failed == 0 ? 0 : 1);

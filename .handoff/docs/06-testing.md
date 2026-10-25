@@ -1,6 +1,6 @@
 # 06 测试
 
-## 1. 基线：360 项（服务端 173 + 客户端 187）
+## 1. 基线：364 项（服务端 173 + 客户端 191）
 
 ```bash
 # 服务端（173 项）—— 在 /home/hlh/pvzge 下跑
@@ -9,13 +9,17 @@ python3 tools/test-concurrency.py    # 19  并发写/锁/乐观版本号
 bash  tools/test-save-versions.sh    # 35  版本隔离 + 向下兼容迁移 + 回滚 + 历史保留策略
 node  tools/test-sync-offline.js     # 41  客户端 sync.js 沙盒（冲突/退避/401/回滚）
 
-# 客户端（187 项）—— 在仓库根目录跑
+# 客户端（191 项）—— 在仓库根目录跑
 dart run tool/check_local_server.dart          # 43  本地服务器（注入/Range/穿越/软链/并发）
 dart run tool/check_storage_migration.dart     # 63  迁移 + 日志自愈 + 空间预检 + 事务门禁
 dart run tool/check_desktop_zip.dart <zip>     # 11  流式解压 + zip-slip
-dart run tool/check_game_host_contract.dart    # 43  原生退出原因契约 + 会话令牌 + 凭据文件 + 启动 + 存档分区
+dart run tool/check_game_host_contract.dart    # 47  原生退出原因契约 + 会话令牌 + 凭据 + 启动 + 存档分区 + 桌面宿主
 dart run tool/check_update_manifest.dart       # 27  Windows 更新清单 + 版本判定 + 更新脚本编码/引号/回滚
 ```
+
+# Android 原生视口单测（JVM，不需要设备）
+cd android && ./gradlew :app:testDebugUnitTest --tests '*GameViewportSizeTest*'
+# 4 项：21:9 / 20:9 / 4:3 按窗口原样返回；固定 17:9 与非法尺寸
 
 `<zip>` fixture 不是任意包：`check_desktop_zip.dart` 对内容有明确预期
 （3 个正常条目 + 1 个越界条目 + 一个 3 MiB 的 `assets/big.bin`）。

@@ -10,9 +10,16 @@ internal object GameViewportSize {
     private const val MIN_ASPECT_RATIO = 16.0 / 10.0
     private const val MAX_ASPECT_RATIO = 17.0 / 9.0
 
-    /** Show all keeps the whole 17:9 picture; the other fits allow 16:10–17:9. */
+    /**
+     * Balanced = native: the page gets exactly the window, so a 21:9 phone is
+     * 21:9 instead of being cropped/letterboxed to 16:9.
+     *
+     * Show all keeps the whole 17:9 picture (letterboxed). Stretch measures a
+     * 16:10–17:9 viewport and then scales it over the whole window.
+     */
     fun fit(width: Int, height: Int, screenFit: GameScreenFit): Pair<Int, Int> {
         if (width <= 0 || height <= 0) return 0 to 0
+        if (screenFit == GameScreenFit.BALANCED) return width to height
         val minAspectRatio =
             if (screenFit == GameScreenFit.SHOW_ALL) MAX_ASPECT_RATIO else MIN_ASPECT_RATIO
         val aspectRatio = width.toDouble() / height
