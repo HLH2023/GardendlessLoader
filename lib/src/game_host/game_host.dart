@@ -57,6 +57,15 @@ enum ScreenFit {
   }
 }
 
+/// 游戏会话形态：本地资源包 / 在线（安卓端从服务器拉游戏页）。
+enum GameSessionMode {
+  local,
+  online;
+
+  static GameSessionMode fromName(Object? value) =>
+      value == 'online' ? GameSessionMode.online : GameSessionMode.local;
+}
+
 class GameSession {
   const GameSession({
     required this.sessionId,
@@ -64,6 +73,9 @@ class GameSession {
     required this.resourceRoot,
     required this.platform,
     required this.entryPath,
+    this.mode = GameSessionMode.local,
+    this.originOverride,
+    this.appRoot,
     required this.activationGeneration,
     required this.hasGpNext,
     required this.gpNextCompatible,
@@ -108,6 +120,12 @@ class GameSession {
     return GameSession(
       sessionId: _requiredString(json, 'sessionId'),
       packageId: json['packageId'] as String?,
+      mode: GameSessionMode.fromName(json['mode']),
+      // 本地形态的 origin 由平台内置给出，不能把 JSON 里的值当覆盖
+      originOverride: GameSessionMode.fromName(json['mode']) == GameSessionMode.online
+          ? json['origin'] as String?
+          : null,
+      appRoot: json['appRoot'] as String?,
       resourceRoot: _requiredString(json, 'resourceRoot'),
       platform: GameHostPlatform.fromWireName(json['platform']),
       entryPath: entryPath,
@@ -159,7 +177,16 @@ class GameSession {
   final String gpNextRoot;
   final String exportTemporaryRoot;
 
-  String get origin => platform.origin;
+  /// 会话形态。在线形态下 [originOverride] 指向服务器，`resourceRoot` 不参与取资源。
+  final GameSessionMode mode;
+
+  /// 在线形态的 origin（服务器地址）；本地形态为空，用平台内置 origin。
+  final String? originOverride;
+
+  /// 启动器数据目录（存档桥文件所在的目录）。为空时由原生按资源槽的父目录推导。
+  final String? appRoot;
+
+  String get origin => originOverride ?? platform.origin;
 
   Uri get entryUri {
     final base = Uri.parse('$origin/$entryPath');
@@ -178,6 +205,8 @@ class GameSession {
       'state': 'prepared',
       'resourceRoot': resourceRoot,
       'platform': platform.wireName,
+      'mode': mode.name,
+      if (appRoot != null) 'appRoot': appRoot,
       'origin': origin,
       'entryPath': entryPath,
       'entryUrl': entryUri.toString(),

@@ -1391,6 +1391,74 @@ class AppController extends ChangeNotifier {
     return (currentGameVersion ?? '').trim();
   }
 
+  /// 安卓在线形态启动。
+  ///
+  /// 在线形态必须已登录：`/_save/online/` 走 Bearer 鉴权（不用 authentik cookie，
+  /// 因为 App 的 WebView 是跨站环境带不上 cookie）。
+  Future<void> _startAndroidOnlineGame(AppPaths paths) async {
+    final base = _appSettings.effectiveServerBaseUrl;
+    if (base.isEmpty) {
+      const failure = '还没有配置服务器地址，无法在线游玩';
+      _message = const LauncherMessage(failure, 'online_play_no_server');
+      notifyListeners();
+      throw StateError(failure);
+    }
+    if (!_appSettings.hasDeviceToken) {
+      const failure = '在线游玩需要先登录账号';
+      _message = const LauncherMessage(failure, 'online_play_needs_signin');
+      notifyListeners();
+      throw StateError(failure);
+    }
+    final session = GameSession(
+      sessionId: _newGameSessionId(),
+      packageId: null,
+      resourceRoot: paths.root.path,
+      appRoot: paths.root.path,
+      mode: GameSessionMode.online,
+      originOverride: base,
+      platform: gameHostPlatform,
+      // 服务端 /_save/online/ 是「游戏本体 + Bearer 鉴权 + 不注入脚本」的路由
+      entryPath: '_save/online/index.html',
+      activationGeneration: _manifest.generation,
+      hasGpNext: hasGpNext,
+      gpNextCompatible: gpNextCompatible,
+      gpNextVersion: gpNextVersion,
+      watermarkEnabled: watermarkEnabled,
+      autoCollectSunEnabled: _manifest.autoCollectSunEnabled,
+      detailedAudioDiagnosticsEnabled: detailedAudioDiagnosticsEnabled,
+      renderScale: renderResolution.scale,
+      screenFit: screenFit,
+      touchDiagnosticsEnabled: toolShedUnlocked && touchDiagnosticsEnabled,
+      gestureHint: _appSettings.gestureHintShown
+          ? null
+          : AppStrings.current.gestureHintLines(gameHostPlatform),
+      allowedRemoteHosts: _allowedRemoteHosts(),
+      gpNextRoot: paths.gpNextDir.path,
+      exportTemporaryRoot: Directory(p.join(paths.gpNextDir.path, '.exports')).path,
+    );
+    final store = _gameSessionStore ??= GameSessionStore(paths.root);
+    // 存档桥必须先落盘：原生侧从 appRoot 读它拿设备令牌
+    await _prepareSaveBridge(paths.root);
+    if (_appSettings.gestureHintShown == false && session.gestureHint != null) {
+      await _updateAppSettings(_appSettings.copyWith(gestureHintShown: true));
+    }
+    await store.prepare(session);
+    _startOnlineHeartbeat();
+    final operation = _appLogger.startOperation(
+      operationId: _newOperationId('game-launch-online'),
+      category: 'game.host',
+      startedEvent: 'game_host_launch_started',
+      finishedEvent: 'game_host_launch_finished',
+      failureCode: 'game_host_launch_failed',
+      gameSessionId: session.sessionId,
+    );
+    try {
+      await operation.run(() => _gameHost.launch(session));
+    } finally {
+      await _stopOnlineHeartbeat();
+    }
+  }
+
   /// 桌面端准备游戏：起本地服务器（本地资源 / 反代上游），返回要加载的地址。
   ///
   /// 两种形态都经过 [LocalResourceServer]，页面 origin 固定是 127.0.0.1，
@@ -1537,6 +1605,14 @@ class AppController extends ChangeNotifier {
   Future<void> startGame() async {
     final paths = _requirePaths();
     _message = null;
+
+    // ── 安卓在线形态 ──
+    // 不读本地资源，会话 origin 直接指向服务器的 /_save/online/（Bearer 鉴权、
+    // 服务端不做脚本注入），原生侧带令牌取资源并注入同一份存档桥。
+    if (playMode == PlayMode.online && Platform.isAndroid) {
+      return _startAndroidOnlineGame(paths);
+    }
+
     final activeDirectory = _importService.activeDirectory(paths, _manifest);
     if (!_currentValidation.isValid) {
       _message = _failureMessage(

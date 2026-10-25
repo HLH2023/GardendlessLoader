@@ -17,7 +17,38 @@ class GameWebViewClient(
     documentStartScript: String,
     private val onRendererGone: (Boolean) -> Unit,
 ) : WebViewClient() {
-    private val resolver = GameResourceResolver(java.io.File(session.resourceRoot), documentStartScript)
+    // 本地形态：从资源槽读文件并内联 document-start 脚本。
+    // 在线形态：没有本地资源，改为带 Bearer 令牌去服务器取，并把存档桥
+    // 注入到 HTML（服务端 /_save/online/ 刻意不做 sub_filter 注入）。
+    private val resolver: GameResourceResolver? =
+        if (session.mode == GameMode.LOCAL) {
+            GameResourceResolver(java.io.File(session.resourceRoot), documentStartScript)
+        } else {
+            null
+        }
+    private val online: OnlineGameResourceClient? =
+        if (session.mode == GameMode.ONLINE) {
+            val bridgeFile = java.io.File(session.appRoot, GameActivity.SAVE_BRIDGE_FILE_NAME)
+            val credentials = OnlineGameResourceClient.readBridgeCredentials(bridgeFile)
+            val bridgeScript = runCatching { bridgeFile.readText() }.getOrNull()
+            if (credentials != null && !bridgeScript.isNullOrBlank()) {
+                OnlineGameResourceClient(session.origin, credentials.second, bridgeScript)
+            } else {
+                AppLogStore.emit(
+                    source = "android",
+                    level = "ERROR",
+                    category = "game.resource",
+                    event = "online_resource_unavailable",
+                    outcome = "failed",
+                    code = "online_bridge_missing",
+                    gameSessionId = session.sessionId,
+                    context = mapOf("reason" to "no device token / bridge script"),
+                )
+                null
+            }
+        } else {
+            null
+        }
     private val origin = Uri.parse(session.origin)
     private val allowedRemoteHosts = session.allowedRemoteHosts
 
@@ -26,8 +57,38 @@ class GameWebViewClient(
         request: WebResourceRequest,
     ): WebResourceResponse? {
         val url = request.url
+        val onlineClient = online
+        if (onlineClient != null) {
+            if (!onlineClient.accepts(url.toString())) return null
+            val response = onlineClient.fetch(
+                url = url.toString(),
+                method = request.method,
+                requestHeaders = request.requestHeaders,
+            )
+            if (response.statusCode >= 400) {
+                AppLogStore.emit(
+                    source = "android",
+                    level = "WARN",
+                    category = "game.resource",
+                    event = "resource_request_failed",
+                    outcome = "failed",
+                    code = "online_resource_${response.statusCode}",
+                    gameSessionId = session.sessionId,
+                    context = mapOf("path" to url.path, "statusCode" to response.statusCode),
+                )
+            }
+            return WebResourceResponse(
+                response.mimeType,
+                response.encoding,
+                response.statusCode,
+                response.reason,
+                response.headers,
+                response.body,
+            )
+        }
+        val localResolver = resolver ?: return null
         if (url.scheme == origin.scheme && url.host == origin.host) {
-            val response = resolver.resolve(
+            val response = localResolver.resolve(
                 url = url.toString(),
                 method = request.method,
                 requestHeaders = request.requestHeaders,
