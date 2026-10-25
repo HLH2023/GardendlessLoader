@@ -398,7 +398,8 @@
         "total": 334,
         "passed": 321,
         "failed": 4,
-        "skipped": 1
+        "skipped": 9,
+        "note": "cloud-saves 的 1 个 SKIP 块包含 9 条会话令牌断言（线上未部署时整块跳过）；321+4+9=334"
       },
       "artifacts": [
         {
@@ -428,7 +429,7 @@
         "复核并推送服务端仓库改动（server.py / admin.html / docker-compose.yml / 3 个测试脚本 / publish-windows.sh）",
         "把 HANDOFF.md 第 2 节更新到 hlh.18 并在第 4 节勾选；发布后补 state.release.releaseUrl"
       ],
-      "verifyOutput": "== 文件齐备 ==\n  ok   存在 .handoff/PROTOCOL.md\n  ok   存在 .handoff/HANDOFF.md\n  ok   存在 .handoff/state.json\n  ok   存在 .handoff/docs/01-architecture.md\n  ok   存在 .handoff/docs/02-branches.md\n  ok   存在 .handoff/docs/03-versioning.md\n  ok   存在 .handoff/docs/04-build.md\n  ok   存在 .handoff/docs/05-deployment.md\n  ok   存在 .handoff/docs/06-testing.md\n  ok   存在 .handoff/docs/07-backlog.md\n  ok   存在 .handoff/docs/08-handoff-log.md\n  ok   存在 .handoff/prompts/01-start.md\n  ok   存在 .handoff/prompts/02-return.md\n  ok   存在 .handoff/skills/gardendless-dev/SKILL.md\n\n== state.json 结构 ==\n  ok   OK in_progress suites= 9 total= 334\n\n== 回执完整性 ==\n  ok   OK 3 条回执字段完整\n\n== 敏感信息扫描（.handoff + AGENTS.md + tools/handoff.sh） ==\n  ok   未发现服务器地址/令牌字面量\n\n== 源码敏感扫描（lib/tool/android/.github/pubspec/docs） ==\n  ok   源码与配置未出现服务器地址/令牌\n\n== AGENTS.md 只放持久信息 ==\n  ok   未出现版本号/任务号/测试数字/哈希等易变事实\n\n== Windows 构建脚本编码 ==\n  ok   build-windows.ps1 为 UTF-8 BOM + CRLF（bom-ok crlf=70 lf_only=0）\n\n== 短提示词长度 ==\n  ok   01-start.md 共 9 行（≤14）\n\n== 技能安装 ==\n  ok   已装入 opencode 全局 skills\n\n结果：22 通过 / 0 失败 / 0 警告"
+      "verifyOutput": "== 文件齐备 ==\n  ok   存在 .handoff/PROTOCOL.md\n  ok   存在 .handoff/HANDOFF.md\n  ok   存在 .handoff/state.json\n  ok   存在 .handoff/docs/01-architecture.md\n  ok   存在 .handoff/docs/02-branches.md\n  ok   存在 .handoff/docs/03-versioning.md\n  ok   存在 .handoff/docs/04-build.md\n  ok   存在 .handoff/docs/05-deployment.md\n  ok   存在 .handoff/docs/06-testing.md\n  ok   存在 .handoff/docs/07-backlog.md\n  ok   存在 .handoff/docs/08-handoff-log.md\n  ok   存在 .handoff/prompts/01-start.md\n  ok   存在 .handoff/prompts/02-return.md\n  ok   存在 .handoff/skills/gardendless-dev/SKILL.md\n\n== state.json 结构 ==\n  ok   OK review suites= 9 total= 334\n\n== 回执完整性 ==\n  ok   OK 3 条回执字段完整\n\n== 敏感信息扫描（.handoff + AGENTS.md + tools/handoff.sh） ==\n  ok   未发现服务器地址/令牌字面量\n\n== 源码敏感扫描（lib/tool/android/.github/pubspec/docs） ==\n  ok   源码与配置未出现服务器地址/令牌\n\n== AGENTS.md 只放持久信息 ==\n  ok   未出现版本号/任务号/测试数字/哈希等易变事实\n\n== Windows 构建脚本编码 ==\n  ok   build-windows.ps1 为 UTF-8 BOM + CRLF（bom-ok crlf=70 lf_only=0）\n\n== 短提示词长度 ==\n  ok   01-start.md 共 9 行（≤14）\n\n== 技能安装 ==\n  ok   已装入 opencode 全局 skills\n\n结果：22 通过 / 0 失败 / 0 警告"
     }
   ],
   "handoffLog": [
