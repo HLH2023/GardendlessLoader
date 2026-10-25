@@ -275,13 +275,18 @@ class AppStrings {
   String get savesRestore => _t('回滚', 'Roll back');
   String get savesRestoreConfirmTitle => _t('回滚云端存档？', 'Roll back the cloud save?');
   String savesRestoreConfirmBody(String key) => _t(
-        '云端的「$key」会被替换成所选的历史版本。当前版本会先留一份快照，'
-        '下次启动游戏时同步到本机。',
-        'The cloud copy of "$key" is replaced with the selected version. The '
-            'current one is snapshotted first and reaches this device the next '
-            'time the game starts.',
+        '云端的「$key」会被替换成所选的历史版本，当前版本会先留一份快照。'
+        '回滚后请退出游戏重新进入 —— 本机这份进度会被云端覆盖，否则它会把回滚结果写回去。',
+        'The cloud copy of "$key" is replaced with the selected version, and '
+            'the current one is snapshotted first. Close and reopen the game '
+            'afterwards: this device\'s progress is overwritten by the cloud '
+            'copy, otherwise it would write the rollback straight back.',
       );
-  String get savesRestoreDone => _t('已回滚，重启游戏后生效', 'Rolled back; restart the game');
+  String get savesRestoreDone => _t(
+        '已回滚 · 请退出游戏重新进入，本机进度会被云端覆盖',
+        'Rolled back · close and reopen the game; the cloud copy overwrites '
+            'this device',
+      );
   String get savesRestoreFailed => _t('回滚失败', 'Roll back failed');
   String get savesWrittenBy => _t('最后写入', 'Last written by');
   String get savesUploadHint => _t(

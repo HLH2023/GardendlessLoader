@@ -335,6 +335,7 @@ class AppController extends ChangeNotifier {
   Future<bool> restoreSaveVersion({
     required String key,
     required int ts,
+    String name = '',
   }) async {
     final base = _appSettings.effectiveServerBaseUrl;
     final token = _appSettings.deviceToken.trim();
@@ -355,6 +356,7 @@ class AppController extends ChangeNotifier {
         user: user,
         key: key,
         ts: ts,
+        name: name,
       );
       _saveRestoreMessage = 'save_restore_done';
       _appLogger.emit(

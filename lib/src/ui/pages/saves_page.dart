@@ -371,7 +371,11 @@ class _SaveEntryCard extends StatelessWidget {
       ),
     );
     if (confirmed != true) return;
-    await controller.restoreSaveVersion(key: entry.key, ts: version.ts);
+    await controller.restoreSaveVersion(
+      key: entry.key,
+      ts: version.ts,
+      name: version.name,
+    );
   }
 }
 

@@ -149,6 +149,7 @@ class CloudSaveVersion {
     required this.bytes,
     required this.device,
     required this.summary,
+    this.name = '',
   });
 
   factory CloudSaveVersion.fromJson(Map<String, Object?> json) {
@@ -157,11 +158,14 @@ class CloudSaveVersion {
       throw const FormatException('history item has no timestamp');
     }
     final device = json['device'];
+    final name = json['name'];
     return CloudSaveVersion(
       ts: ts,
       bytes: CloudSaveSnapshot._asInt(json['bytes']) ?? 0,
       device: device is String ? device : '',
       summary: CloudSaveSnapshot._mapOf(json['summary']),
+      // 服务端历史文件名，例如 1792892941-3.json；空表示老接口没给
+      name: name is String ? name : '',
     );
   }
 
@@ -171,6 +175,10 @@ class CloudSaveVersion {
   /// 服务端记录的最后写入设备标签，例如 `PLG110 · Chrome 155`。
   final String device;
   final Map<String, Object?> summary;
+
+  /// 服务端历史文件名（`<ts>.json` 或 `<ts>-<n>.json`）。回滚时带上它，
+  /// 同一秒内有多个版本时才能精确命中，而不是取该秒里的某一份。
+  final String name;
 
   DateTime get writtenAt => DateTime.fromMillisecondsSinceEpoch(ts * 1000);
 

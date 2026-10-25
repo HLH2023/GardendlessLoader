@@ -340,15 +340,21 @@ class RemoteResourceService {
     required String user,
     required String key,
     required int ts,
+    String name = '',
     Duration timeout = saveServerRequestTimeout,
   }) async {
+    final body = <String, Object?>{'user': user, 'key': key, 'ts': ts};
+    if (name.isNotEmpty) {
+      // 精确到具体历史文件：同一秒内可能有多个版本
+      body['name'] = name;
+    }
     await _postJson(
       _resolve(baseUrl, saveRestorePath),
       token: token,
       timeout: timeout,
       maxBytes: saveServerSavesMaxBytes,
       code: 'save_restore_failed',
-      body: <String, Object?>{'user': user, 'key': key, 'ts': ts},
+      body: body,
     );
   }
 
