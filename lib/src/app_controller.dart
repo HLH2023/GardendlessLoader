@@ -2217,6 +2217,26 @@ class AppController extends ChangeNotifier {
         token: token,
         baseUrl: base,
       );
+      // 存档面板（右下角悬浮按钮）与同步桥共用同一个 document-start 文件：
+      // 面板要读同一份 __PVZGE_APP__ 配置，分成两个文件反而要额外注入点。
+      // 面板拉不到不是致命错误 —— 游戏照常启动，只是没有入口。
+      var panel = '';
+      try {
+        panel = await _remoteResourceService.fetchAppUiScript(
+          token: token,
+          baseUrl: base,
+        );
+      } catch (error, stackTrace) {
+        _appLogger.emit(
+          level: LogLevel.warn,
+          category: 'game.host',
+          event: 'save_panel_unavailable',
+          outcome: LogOutcome.failed,
+          code: 'save_panel_unavailable',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
       final buffer = StringBuffer()
         ..write('window.__PVZGE_APP__={base:')
         ..write(_jsStringLiteral(base))
@@ -2224,6 +2244,11 @@ class AppController extends ChangeNotifier {
         ..write(_jsStringLiteral(token))
         ..write('};\n')
         ..write(escapeDocumentStartScript(script));
+      if (panel.isNotEmpty) {
+        buffer
+          ..write('\n;\n')
+          ..write(escapeDocumentStartScript(panel));
+      }
       final content = buffer.toString();
       await file.writeAsString(content, flush: true);
       _appLogger.emit(

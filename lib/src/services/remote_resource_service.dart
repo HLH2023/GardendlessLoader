@@ -268,6 +268,24 @@ class RemoteResourceService {
     );
   }
 
+  /// The in-game save panel (floating button) served over the same Bearer
+  /// channel as the sync bridge; it opens the must-authenticated save manager
+  /// page inside the game view.
+  Future<String> fetchAppUiScript({
+    required String token,
+    required String baseUrl,
+    Duration timeout = saveServerRequestTimeout,
+  }) {
+    return _getText(
+      _resolve(baseUrl, '/_save/app-ui.js'),
+      token: token,
+      timeout: timeout,
+      maxBytes: saveServerScriptMaxBytes,
+      code: 'save_panel_unavailable',
+      accept: 'text/javascript, */*',
+    );
+  }
+
   /// `GET {base}{path}` with the device token attached, as text.
   ///
   /// A caller that publishes its own document format (the APK manifest) uses
