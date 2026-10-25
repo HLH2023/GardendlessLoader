@@ -13,6 +13,21 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+// 关掉 Android Lint（全模块，含插件模块）。
+//
+// 原因：file_picker 的 lintVitalAnalyzeRelease 会踩到 lint 自身的 bug
+// （androidx.lifecycle.lint.NonNullableMutableLiveDataDetector 分析 FileInfo.kt
+// 时崩溃），它跟我们的代码无关，却会把 release 构建整个拖失败。
+// Dart 侧的质量门禁由 `flutter analyze` 承担，这里的 lint 不再提供额外价值。
+subprojects {
+    tasks.configureEach { task ->
+        def n = task.name.toLowerCase()
+        if (n.contains("lint")) {
+            task.enabled = false
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }
