@@ -239,7 +239,63 @@ class AppStrings {
             'at the top right to check now.',
       );
   String get cloudDriveUpdate => _t('网盘更新', 'Update from cloud drive');
+  String get navSaves => _t('存档', 'Saves');
   String get saveManager => _t('存档管理', 'Save manager');
+  String get savesTitle => _t('云端存档', 'Cloud saves');
+  String get savesSubtitle => _t(
+        '这里读的是服务器上的存档状态。回滚只改云端，重启游戏后才会同步到本机。',
+        'This page reads what the server holds. Rolling back changes the cloud '
+            'copy only; it reaches this device the next time the game starts.',
+      );
+  String get savesAccount => _t('账号', 'Account');
+  String get savesLastSync => _t('最后同步', 'Last write');
+  String get savesTotalSize => _t('合计', 'Total');
+  String get savesEntryCount => _t('条目', 'Entries');
+  String get savesRefresh => _t('刷新', 'Refresh');
+  String get savesEmpty => _t(
+        '云端还没有这个账号的存档。进游戏玩一次，进度会自动上传。',
+        'No saves for this account yet. Play once and the progress uploads '
+            'automatically.',
+      );
+  String get savesNotConfigured => _t(
+        '还没登录云存档服务器，去「设置」页用 authentik 登录后就能看到。',
+        'Not signed in to the save server. Use authentik in Settings first.',
+      );
+  String get savesLoadFailed => _t(
+        '读取云端存档失败，可能是网络不通或令牌已失效。',
+        'Could not read cloud saves: network down or the token was rejected.',
+      );
+  String get savesHistory => _t('历史版本', 'Versions');
+  String get savesHistoryHide => _t('收起历史', 'Hide versions');
+  String get savesHistoryEmpty => _t('这个存档还没有历史版本。', 'No versions yet.');
+  String get savesHistoryForbidden => _t(
+        '查看历史版本需要管理员权限：该入口仅在 authentik 的 Admins 组可见。',
+        'Version history needs the authentik Admins group.',
+      );
+  String get savesRestore => _t('回滚', 'Roll back');
+  String get savesRestoreConfirmTitle => _t('回滚云端存档？', 'Roll back the cloud save?');
+  String savesRestoreConfirmBody(String key) => _t(
+        '云端的「$key」会被替换成所选的历史版本。当前版本会先留一份快照，'
+        '下次启动游戏时同步到本机。',
+        'The cloud copy of "$key" is replaced with the selected version. The '
+            'current one is snapshotted first and reaches this device the next '
+            'time the game starts.',
+      );
+  String get savesRestoreDone => _t('已回滚，重启游戏后生效', 'Rolled back; restart the game');
+  String get savesRestoreFailed => _t('回滚失败', 'Roll back failed');
+  String get savesWrittenBy => _t('写入设备', 'Written by');
+  String get savesPlayer => _t('玩家', 'Player');
+  String get savesCoin => _t('金币', 'Coins');
+  String get savesGem => _t('宝石', 'Gems');
+  String get savesWorld => _t('世界', 'World');
+  String get savesNothingYet => _t('—', '—');
+  String savesKeyLabel(String key) => switch (key) {
+        'PvZ2_PlayerProperties' => _t('玩家进度', 'Player progress'),
+        'PvZ2_Settings' => _t('游戏设置', 'Settings'),
+        'PvZ2_GitHubLevels' => _t('GitHub 关卡', 'GitHub levels'),
+        'PvZ2_GitHubLevels_Sha' => _t('关卡校验值', 'Levels checksum'),
+        _ => key,
+      };
   String get saveManagerHint => _t(
         '云存档的历史版本、回滚与设备列表在服务器的管理页里，需在浏览器中打开（沿用同一 authentik 账号）。',
         'Save history, rollback and the device list live on the server\'s '

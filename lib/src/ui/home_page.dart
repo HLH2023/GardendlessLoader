@@ -16,6 +16,7 @@ import 'launcher_actions.dart';
 import 'pages/play_page.dart';
 import 'pages/logs_page.dart';
 import 'pages/resources_page.dart';
+import 'pages/saves_page.dart';
 import 'pages/settings_page.dart';
 import 'theme/garden_theme.dart';
 import 'widgets/announcement_dialog.dart';
@@ -250,6 +251,11 @@ class _HomePageState extends State<HomePage> {
           compact: compact,
           detailsExpanded: _importDetailsExpanded,
         ),
+      LauncherDestination.saves => SavesPage(
+          controller: _controller,
+          actions: _actions,
+          compact: compact,
+        ),
       LauncherDestination.logs => LogsPage(
           controller: _controller,
           actions: _actions,
@@ -266,6 +272,10 @@ class _HomePageState extends State<HomePage> {
   void _navigate(LauncherDestination destination) {
     if (destination == _destination) return;
     setState(() => _destination = destination);
+    if (destination == LauncherDestination.saves) {
+      // 存档随时可能被别的设备改写，切页就重拉一次。
+      _controller.refreshCloudSaves();
+    }
     if (destination == LauncherDestination.logs) {
       unawaited(_controller.refreshLogs());
     }
@@ -692,6 +702,7 @@ class _Sidebar extends StatelessWidget {
             : const _Dot(key: ValueKey('app-update-dot'));
       case LauncherDestination.game:
       case LauncherDestination.logs:
+      case LauncherDestination.saves:
         return null;
     }
   }

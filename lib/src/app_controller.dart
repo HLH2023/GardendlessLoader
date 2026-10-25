@@ -21,6 +21,7 @@ import 'services/app_paths_service.dart';
 import 'services/app_settings_store.dart';
 import 'services/app_update_service.dart';
 import 'services/cloud_login_service.dart';
+import 'services/cloud_save_service.dart';
 import 'services/diagnostics_service.dart';
 import 'services/garden_journal.dart';
 import 'services/game_update_check_service.dart';
@@ -71,6 +72,17 @@ class AppController extends ChangeNotifier {
   File? _appUpdateFile;
   RemoteDownloadCancellation? _appUpdateCancellation;
   CloudLoginStatus _cloudLogin = CloudLoginStatus.idle;
+
+  // 云端存档页（独立页面）的状态。刷新失败不阻塞任何游戏流程。
+  CloudSaveSnapshot? _cloudSaves;
+  bool _cloudSavesLoading = false;
+  String? _cloudSavesError;
+  Map<String, List<CloudSaveVersion>> _saveHistory =
+      <String, List<CloudSaveVersion>>{};
+  final Set<String> _saveHistoryLoading = <String>{};
+  String? _saveHistoryError;
+  String? _saveRestoreInProgress;
+  String? _saveRestoreMessage;
   RemoteResourceManifest? _remoteManifest;
   ({String? code, String message})? _remoteManifestFailure;
   bool _remoteManifestLoading = false;
@@ -222,6 +234,161 @@ class AppController extends ChangeNotifier {
   String get saveAdminUrl {
     final base = _appSettings.effectiveServerBaseUrl;
     return base.isEmpty ? '' : '$base$saveAdminPagePath';
+  }
+
+  /// 云端存档页的状态：快照、错误、历史缓存与进行中的操作。
+  CloudSaveSnapshot? get cloudSaves => _cloudSaves;
+  bool get cloudSavesLoading => _cloudSavesLoading;
+  bool get cloudSavesRefreshing => _cloudSavesLoading && _cloudSaves != null;
+  String? get cloudSavesError => _cloudSavesError;
+  Map<String, List<CloudSaveVersion>> get saveHistory => _saveHistory;
+  String? get saveHistoryError => _saveHistoryError;
+  Set<String> get saveHistoryLoading => _saveHistoryLoading;
+  String? get saveRestoreInProgress => _saveRestoreInProgress;
+  String? get saveRestoreMessage => _saveRestoreMessage;
+
+  /// 拉取云端存档元信息。离线/未登录都不抛：页面只需要一个可读的错误码。
+  Future<void> refreshCloudSaves() async {
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) {
+      _cloudSaves = null;
+      _cloudSavesError = 'save_server_not_configured';
+      notifyListeners();
+      return;
+    }
+    if (_cloudSavesLoading) return;
+    _cloudSavesLoading = true;
+    _cloudSavesError = null;
+    notifyListeners();
+    try {
+      final snapshot = await _remoteResourceService.fetchCloudSaves(
+        token: token,
+        baseUrl: base,
+      );
+      if (token != _appSettings.deviceToken.trim()) return;
+      _cloudSaves = snapshot;
+    } on RemoteResourceFailure catch (failure) {
+      _cloudSavesError = failure.code;
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'cloud.saves',
+        event: 'cloud_saves_refresh',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        context: <String, Object?>{'message': failure.message},
+      );
+    } catch (error, stackTrace) {
+      _cloudSavesError = 'cloud_saves_unavailable';
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'cloud.saves',
+        event: 'cloud_saves_refresh',
+        outcome: LogOutcome.failed,
+        code: 'cloud_saves_unavailable',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    } finally {
+      _cloudSavesLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// 拉取某个存档键的历史版本（管理员）。403 时给出明确错误码而不是空列表。
+  Future<void> loadSaveHistory(String key) async {
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    final user = _cloudSaves?.user ?? _appSettings.deviceAccount;
+    if (base.isEmpty || token.isEmpty || user.isEmpty) {
+      _saveHistoryError = 'save_server_not_configured';
+      notifyListeners();
+      return;
+    }
+    if (!_saveHistoryLoading.add(key)) return;
+    _saveHistoryError = null;
+    notifyListeners();
+    try {
+      final versions = await _remoteResourceService.fetchSaveHistory(
+        token: token,
+        baseUrl: base,
+        user: user,
+        key: key,
+      );
+      _saveHistory = <String, List<CloudSaveVersion>>{
+        ..._saveHistory,
+        key: versions,
+      };
+    } on RemoteResourceFailure catch (failure) {
+      _saveHistoryError = failure.code;
+      _saveHistory = <String, List<CloudSaveVersion>>{
+        ..._saveHistory,
+        key: const <CloudSaveVersion>[],
+      };
+    } finally {
+      _saveHistoryLoading.remove(key);
+      notifyListeners();
+    }
+  }
+
+  /// 回滚云端存档到某个历史版本；成功后刷新快照。
+  Future<bool> restoreSaveVersion({
+    required String key,
+    required int ts,
+  }) async {
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    final user = _cloudSaves?.user ?? _appSettings.deviceAccount;
+    if (base.isEmpty || token.isEmpty || user.isEmpty) {
+      _saveRestoreMessage = 'save_server_not_configured';
+      notifyListeners();
+      return false;
+    }
+    if (_saveRestoreInProgress != null) return false;
+    _saveRestoreInProgress = key;
+    _saveRestoreMessage = null;
+    notifyListeners();
+    try {
+      await _remoteResourceService.restoreSaveVersion(
+        token: token,
+        baseUrl: base,
+        user: user,
+        key: key,
+        ts: ts,
+      );
+      _saveRestoreMessage = 'save_restore_done';
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'cloud.saves',
+        event: 'cloud_save_restored',
+        outcome: LogOutcome.succeeded,
+        context: <String, Object?>{'key': key, 'ts': ts},
+      );
+      _saveRestoreInProgress = null;
+      notifyListeners();
+      await refreshCloudSaves();
+      return true;
+    } on RemoteResourceFailure catch (failure) {
+      _saveRestoreMessage = failure.code;
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'cloud.saves',
+        event: 'cloud_save_restore',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        context: <String, Object?>{'key': key, 'ts': ts},
+      );
+      return false;
+    } finally {
+      _saveRestoreInProgress = null;
+      notifyListeners();
+    }
+  }
+
+  void clearSaveRestoreMessage() {
+    if (_saveRestoreMessage == null) return;
+    _saveRestoreMessage = null;
+    notifyListeners();
   }
 
   CloudLoginStatus get cloudLogin => _cloudLogin;

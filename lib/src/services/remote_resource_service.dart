@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 
 import '../constants.dart';
+import 'cloud_save_service.dart';
 
 /// A resource ZIP published by the save server's manifest.
 class RemoteResourceZip {
@@ -265,6 +266,89 @@ class RemoteResourceService {
       maxBytes: saveServerScriptMaxBytes,
       code: 'save_bridge_unavailable',
       accept: 'text/javascript, */*',
+    );
+  }
+
+  /// 云端存档的当前状态（键、大小、写入时间、可摘要键的统计）。
+  ///
+  /// `/load` 是任何有效令牌都能读的接口（`/list` 只有管理员能读），所以
+  /// 存档页用它来展示「我自己的云存档」，非管理员也不会 403。
+  Future<CloudSaveSnapshot> fetchCloudSaves({
+    required String token,
+    required String baseUrl,
+    Duration timeout = saveServerRequestTimeout,
+  }) async {
+    final body = await _getText(
+      _resolve(baseUrl, saveLoadPath),
+      token: token,
+      timeout: timeout,
+      maxBytes: saveServerSavesMaxBytes,
+      code: 'cloud_saves_unavailable',
+    );
+    return _parseJson<CloudSaveSnapshot>(
+      body,
+      code: 'cloud_saves_invalid',
+      parse: (json) => CloudSaveSnapshot.fromJson(json),
+    );
+  }
+
+  /// 某个存档键的历史版本（服务端要求管理员组）。
+  Future<List<CloudSaveVersion>> fetchSaveHistory({
+    required String token,
+    required String baseUrl,
+    required String user,
+    required String key,
+    int limit = saveServerHistoryLimit,
+    Duration timeout = saveServerRequestTimeout,
+  }) async {
+    final uri = _resolve(baseUrl, saveHistoryPath).replace(
+      queryParameters: <String, String>{
+        'user': user,
+        'key': key,
+        'limit': '$limit',
+      },
+    );
+    final body = await _getText(
+      uri,
+      token: token,
+      timeout: timeout,
+      maxBytes: saveServerSavesMaxBytes,
+      code: 'save_history_unavailable',
+    );
+    return _parseJson<List<CloudSaveVersion>>(
+      body,
+      code: 'save_history_invalid',
+      parse: (json) {
+        final raw = json['versions'];
+        if (raw is! List) {
+          throw const FormatException('history has no versions array');
+        }
+        return raw
+            .whereType<Map>()
+            .map((item) => CloudSaveVersion.fromJson(
+                  item.map((key, value) => MapEntry(key.toString(), value)),
+                ))
+            .toList(growable: false);
+      },
+    );
+  }
+
+  /// 把云端某个存档键回滚到指定历史版本；服务端会先给当前版本留快照。
+  Future<void> restoreSaveVersion({
+    required String token,
+    required String baseUrl,
+    required String user,
+    required String key,
+    required int ts,
+    Duration timeout = saveServerRequestTimeout,
+  }) async {
+    await _postJson(
+      _resolve(baseUrl, saveRestorePath),
+      token: token,
+      timeout: timeout,
+      maxBytes: saveServerSavesMaxBytes,
+      code: 'save_restore_failed',
+      body: <String, Object?>{'user': user, 'key': key, 'ts': ts},
     );
   }
 
@@ -597,6 +681,79 @@ class RemoteResourceService {
         _activeClient = null;
       }
       client.close(force: true);
+    }
+  }
+
+  Future<String> _postJson(
+    Uri uri, {
+    required String token,
+    required Duration timeout,
+    required int maxBytes,
+    required String code,
+    required Map<String, Object?> body,
+  }) async {
+    final client = HttpClient()..connectionTimeout = timeout;
+    _activeClient = client;
+    try {
+      return await (() async {
+        final request = await client.postUrl(uri);
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        request.headers.set(HttpHeaders.userAgentHeader, appDisplayName);
+        request.headers.contentType = ContentType.json;
+        final payload = utf8.encode(jsonEncode(body));
+        request.contentLength = payload.length;
+        request.add(payload);
+        final response = await request.close();
+        final text = await response
+            .transform(utf8.decoder)
+            .join()
+            .timeout(timeout);
+        if (response.statusCode != HttpStatus.ok) {
+          throw _statusFailure(response.statusCode, code);
+        }
+        if (text.length > maxBytes) {
+          throw RemoteResourceFailure(code, '服务器响应过大');
+        }
+        return text;
+      })()
+          .timeout(timeout);
+    } on RemoteResourceFailure {
+      rethrow;
+    } on TimeoutException {
+      throw RemoteResourceFailure(code, '请求超时');
+    } on SocketException catch (error) {
+      throw RemoteResourceFailure(code, _redact(error.message, uri));
+    } on HttpException catch (error) {
+      throw RemoteResourceFailure(code, _redact(error.message, uri));
+    } finally {
+      if (identical(_activeClient, client)) {
+        _activeClient = null;
+      }
+      client.close(force: true);
+    }
+  }
+
+  T _parseJson<T>(
+    String body, {
+    required String code,
+    required T Function(Map<String, Object?> json) parse,
+  }) {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(body);
+    } on FormatException catch (error) {
+      throw RemoteResourceFailure(code, error.message);
+    }
+    if (decoded is! Map) {
+      throw RemoteResourceFailure(code, '响应不是 JSON 对象');
+    }
+    final json = decoded.map(
+      (key, value) => MapEntry(key.toString(), value),
+    );
+    try {
+      return parse(json);
+    } on FormatException catch (error) {
+      throw RemoteResourceFailure(code, error.message);
     }
   }
 

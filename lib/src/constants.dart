@@ -27,12 +27,17 @@ const saveLoginPagePath = '/_save/app.html'; // 令牌签发页；浏览器打�
 const saveLoginBridgeQuery = 'bridge=1'; // 应用内登录：页面通过 GardendlessBridge 回传令牌
 const saveAdminPagePath = '/_save/admin.html'; // 完整存档管理页（历史/回滚/设备），需浏览器 authentik 会话
 const saveWhoamiPath = '/_save/app/whoami'; // 校验设备令牌，返回 {"user": "..."}
+const saveLoadPath = '/_save/app/load'; // 云端存档元信息（data/mtime/summary）
+const saveHistoryPath = '/_save/app/history'; // 某个存档键的历史版本（需管理员）
+const saveRestorePath = '/_save/app/restore'; // 回滚到指定历史版本
 const saveApkManifestPath =
     '/_save/app/res/apk/manifest.json'; // 应用内更新的 APK 清单，带 Bearer 令牌请求
 const saveApkManifestMaxBytes = 64 * 1024; // APK 清单最大响应体，64KB
 const saveServerDownloadConnectTimeout = Duration(seconds: 20); // 资源下载建立连接的超时时间
 const saveServerManifestMaxBytes = 512 * 1024; // 资源清单最大响应体，512KB
 const saveServerScriptMaxBytes = 2 * 1024 * 1024; // 注入脚本最大响应体，2MB
+const saveServerSavesMaxBytes = 4 * 1024 * 1024; // 存档清单最大响应体（含 meta 摘要），4MB
+const saveServerHistoryLimit = 20; // 存档历史默认拉取条数
 const syncBridgeFileName = '__sync_app.js'; // 云存档注入脚本文件名（与资源槽同级）
 const resourceFolderName = 'GardendlessLoader'; // 资源文件夹名称
 const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '0.9.0');

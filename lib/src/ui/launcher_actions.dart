@@ -10,6 +10,7 @@ import '../services/update_check_service.dart';
 enum LauncherDestination {
   game(Icons.sports_esports_outlined, Icons.sports_esports),
   resources(Icons.inventory_2_outlined, Icons.inventory_2),
+  saves(Icons.cloud_outlined, Icons.cloud),
   logs(Icons.receipt_long_outlined, Icons.receipt_long),
   settings(Icons.settings_outlined, Icons.settings);
 
@@ -21,6 +22,7 @@ enum LauncherDestination {
   String label(AppStrings strings) => switch (this) {
         game => strings.navGame,
         resources => strings.navResources,
+        saves => strings.navSaves,
         logs => strings.navLogs,
         settings => strings.navSettings,
       };
