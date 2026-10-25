@@ -181,6 +181,88 @@ Future<void> main() async {
         StorageUsage.formatBytes(1536));
     check('GB 格式化', StorageUsage.formatBytes(3 * 1024 * 1024 * 1024) == '3.0 GB',
         StorageUsage.formatBytes(3 * 1024 * 1024 * 1024));
+
+    // 9) 迁移日志与启动自愈（模拟「搬到一半进程被杀」）
+    final jrSource = Directory(p.join(temp.path, 'jr-source'));
+    final jrTarget = Directory(p.join(temp.path, 'jr-target'));
+    await jrSource.create(recursive: true);
+    await jrTarget.create(recursive: true);
+    await File(p.join(jrSource.path, 'manifest.json')).writeAsString('{}');
+    await Directory(p.join(jrSource.path, 'slot-a', 'assets')).create(recursive: true);
+    await File(p.join(jrSource.path, 'slot-a', 'index.html')).writeAsString('<html/>');
+
+    final journalFile = File(p.join(jrSource.path, ResourceMigration.journalName));
+    await migration.beginJournal(
+      sourceRoot: jrSource,
+      target: jrTarget,
+      entries: List<String>.from(ResourceMigration.movableEntries),
+    );
+    check('日志已落盘（源目录）', await journalFile.exists());
+
+    // 模拟中断：manifest 与 slot-a 已搬到目标，进程在此刻被杀（日志仍在）
+    Directory(p.join(jrTarget.path, 'slot-a')).createSync(recursive: true);
+    await File(p.join(jrSource.path, 'manifest.json'))
+        .rename(p.join(jrTarget.path, 'manifest.json'));
+    await Directory(p.join(jrSource.path, 'slot-a'))
+        .rename(p.join(jrTarget.path, 'slot-a'));
+    check(
+        '中断后源目录确实残缺',
+        !await File(p.join(jrSource.path, 'manifest.json')).exists() &&
+            !await Directory(p.join(jrSource.path, 'slot-a')).exists());
+
+    final recovery = await migration.recoverIfInterrupted(jrSource);
+    check('自愈返回恢复摘要', recovery != null);
+    check('自愈搬回两项', recovery!.restoredEntries.length == 2,
+        recovery.restoredEntries);
+    check('manifest 回到源目录',
+        await File(p.join(jrSource.path, 'manifest.json')).exists());
+    check('slot-a 回到源目录',
+        await File(p.join(jrSource.path, 'slot-a', 'index.html')).exists());
+    check(
+        '目标目录已清空条目',
+        !await File(p.join(jrTarget.path, 'manifest.json')).exists() &&
+            !await Directory(p.join(jrTarget.path, 'slot-a')).exists());
+    check('自愈后日志被清除', !await journalFile.exists());
+
+    // 10) 没有日志时不应误报
+    final cleanRecovery = await migration.recoverIfInterrupted(jrSource);
+    check('无日志返回 null', cleanRecovery == null);
+
+    // 11) 日志损坏时自动丢弃，不阻塞启动
+    await journalFile.writeAsString('{ not json');
+    final brokenRecovery = await migration.recoverIfInterrupted(jrSource);
+    check('损坏日志返回 null', brokenRecovery == null);
+    check('损坏日志被删除', !await journalFile.exists());
+
+    // 11.5) 空间预检：目标可用空间小于「源大小 + 64MB」时必须拒绝
+    //       用一个假的 usage + freeSpace 组合来验证判定逻辑（避免真的写满磁盘）
+    final tooSmall = ResourceMigration.spaceShortfall(
+        needBytes: 4 * 1024 * 1024 * 1024, freeBytes: 100 * 1024 * 1024);
+    check('空间不足会被拒绝', tooSmall != null, tooSmall);
+    check('空间充足放行',
+        ResourceMigration.spaceShortfall(
+                needBytes: 10 * 1024 * 1024, freeBytes: 2 * 1024 * 1024 * 1024) ==
+            null);
+    check('拿不到剩余空间时不拦（信息不足不误杀）',
+        ResourceMigration.spaceShortfall(needBytes: 10 * 1024 * 1024, freeBytes: null) ==
+            null);
+    check('64MB 余量边界',
+        ResourceMigration.spaceShortfall(
+                needBytes: 1024 * 1024, freeBytes: 1024 * 1024 + 63 * 1024 * 1024) !=
+            null);
+
+    // 12) 日志存在但目标已不存在：不动数据，只清日志
+    await migration.beginJournal(
+      sourceRoot: jrSource,
+      target: Directory(p.join(temp.path, 'gone-target')),
+      entries: List<String>.from(ResourceMigration.movableEntries),
+    );
+    final missingTarget = await migration.recoverIfInterrupted(jrSource);
+    check('目标不存在时恢复为空结果',
+        missingTarget != null && missingTarget.restoredEntries.isEmpty);
+    check('数据仍在源目录',
+        await File(p.join(jrSource.path, 'manifest.json')).exists());
+
   } finally {
     await temp.delete(recursive: true);
   }

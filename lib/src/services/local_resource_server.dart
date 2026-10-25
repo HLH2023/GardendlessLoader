@@ -66,6 +66,9 @@ class LocalResourceServer {
   /// 供外部判断当前是哪种形态。
   bool get isOnline => _upstream != null;
 
+  /// 资源根解析软链后的真实路径（懒加载缓存）。
+  String? _canonicalRoot;
+
   /// 一次性的虚拟路径前缀（内含随机串），挂载注入脚本。
   static String _newNonce() {
     final rand = Random.secure();
@@ -162,7 +165,7 @@ class LocalResourceServer {
     }
 
     final relative = segments.isEmpty ? 'index.html' : segments.join('/');
-    final file = _resolveInside(relative);
+    final file = await _resolveInside(relative);
     if (file == null) {
       response.statusCode = HttpStatus.forbidden;
       return response.close();
@@ -303,7 +306,13 @@ class LocalResourceServer {
   }
 
   /// 把相对路径解析到资源根目录内；越界返回 null。
-  File? _resolveInside(String relative) {
+  ///
+  /// 两道检查缺一不可：
+  ///   1. 词法检查（`..` / 绝对路径）—— 挡住 `../../etc/passwd`
+  ///   2. **符号链接解析** —— `p.canonicalize` 只做字符串归一化，不解析链接。
+  ///      资源目录里放一个指向 /etc/passwd 的软链，词法检查完全看不出问题，
+  ///      结果本地服务器会把根目录外的任意文件喂给页面（已用测试复现过）。
+  Future<File?> _resolveInside(String relative) async {
     final normalized = p.normalize(relative);
     if (normalized.startsWith('..') || p.isAbsolute(normalized)) return null;
     final full = p.join(_root.path, normalized);
@@ -312,7 +321,35 @@ class LocalResourceServer {
     if (fullPath != rootPath && !fullPath.startsWith('$rootPath${p.separator}')) {
       return null;
     }
-    return File(fullPath);
+    final file = File(fullPath);
+    try {
+      // 解析真实路径：软链指到根目录外就当作越权。
+      // 文件不存在会抛异常 —— 那种情况交给后面的 exists() 走 404。
+      final resolved = await file.resolveSymbolicLinks();
+      final resolvedRootText = await _canonicalRootPath();
+      if (resolved != resolvedRootText &&
+          !resolved.startsWith('$resolvedRootText${p.separator}')) {
+        return null;
+      }
+    } on FileSystemException {
+      // 不存在/不可解析：沿用词法结果，由 exists() 决定 404
+    }
+    return file;
+  }
+
+  /// 资源根的真实路径（解析软链后），只算一次。
+  Future<String> _canonicalRootPath() async {
+    final cached = _canonicalRoot;
+    if (cached != null) return cached;
+    try {
+      final resolved = await _root.resolveSymbolicLinks();
+      _canonicalRoot = resolved;
+      return resolved;
+    } catch (_) {
+      final fallback = p.canonicalize(_root.path);
+      _canonicalRoot = fallback;
+      return fallback;
+    }
   }
 
   Future<Uint8List> _htmlWithInjection(File file) async {

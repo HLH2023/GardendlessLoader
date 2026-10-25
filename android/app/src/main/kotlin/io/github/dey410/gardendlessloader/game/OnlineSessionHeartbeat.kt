@@ -45,8 +45,12 @@ class OnlineSessionHeartbeat(
     fun stop() {
         val executor = scheduler ?: return
         scheduler = null
-        runCatching { post("/_save/app/online/leave") }
-        executor.shutdownNow()
+        // 绝不能在这个线程上同步发网络请求：stop() 由 GameActivity.onDestroy()
+        // 在主线程调用，而 post() 的连接/读取各 5 秒超时，网络不通时最坏把主线程
+        // 卡住 10 秒直接 ANR。改成提交到心跳自己的执行器异步发送。
+        // shutdown() 而不是 shutdownNow()：已提交的任务仍会执行完，周期任务会被取消。
+        runCatching { executor.execute { runCatching { post("/_save/app/online/leave") } } }
+        runCatching { executor.shutdown() }
     }
 
     private fun post(path: String) {

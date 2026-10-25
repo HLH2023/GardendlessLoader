@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -59,6 +60,17 @@ class ResourceMigration {
     }
   }
 
+  /// 空间预检判定：返回 null 表示放得下，否则返回给用户看的错误文案。
+  ///
+  /// 拿到剩余空间为 null 时不拦（信息不足不能误杀，交给真正的写入去报错）。
+  static String? spaceShortfall({required int needBytes, int? freeBytes}) {
+    if (needBytes <= 0 || freeBytes == null) return null;
+    const marginBytes = 64 * 1024 * 1024; // 留 64 MB 余量给日志/临时文件
+    if (freeBytes >= needBytes + marginBytes) return null;
+    return '目标位置空间不足：需要 ${StorageUsage.formatBytes(needBytes)}，'
+        '可用 ${StorageUsage.formatBytes(freeBytes)}';
+  }
+
   /// 统计目录占用。
   Future<StorageUsage> usage(Directory root) async {
     var bytes = 0;
@@ -102,6 +114,91 @@ class ResourceMigration {
     }
   }
 
+  /// 迁移日志文件名（写在**源**目录：源目录是当前配置的根，启动时一定找得到）。
+  static const journalName = '.pvz-migrating.json';
+
+  /// 迁移前落日志。写的是「谁要搬到哪、涉及哪些条目」。
+  ///
+  /// 为什么需要：搬迁 1.4 GB 要几分钟，进程被系统杀掉 / 断电都很常见。
+  /// 没有日志时，恢复后会出现「一半条目在新位置、指针还指着老位置」的
+  /// 半残状态，且无从判断哪些条目该搬回来。
+  Future<void> beginJournal({
+    required Directory sourceRoot,
+    required Directory target,
+    required List<String> entries,
+  }) async {
+    final file = File(p.join(sourceRoot.path, journalName));
+    final payload = <String, Object?>{
+      'target': target.path,
+      'entries': entries,
+      'startedAt': DateTime.now().toIso8601String(),
+      'version': 1,
+    };
+    final temp = File('${file.path}.tmp');
+    await temp.writeAsString(const JsonEncoder.withIndent('  ').convert(payload));
+    await temp.rename(file.path);
+  }
+
+  /// 迁移成功（指针已写入新根）或已回滚后，清掉日志。
+  Future<void> clearJournal(Directory sourceRoot) async {
+    final file = File(p.join(sourceRoot.path, journalName));
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+
+  /// 启动自愈：上次迁移被打断时，把已经搬走的条目搬回当前根。
+  ///
+  /// 只做「回退」（搬回源），不做「前滚」（搬去目标）：指针没写过，
+  /// 当前根是唯一已知正确的家；搬回来即可恢复到迁移前的完整状态。
+  Future<StorageRecovery?> recoverIfInterrupted(Directory currentRoot) async {
+    final file = File(p.join(currentRoot.path, journalName));
+    if (!await file.exists()) return null;
+    Map<String, Object?> payload;
+    try {
+      payload = (jsonDecode(await file.readAsString()) as Map).cast<String, Object?>();
+    } catch (_) {
+      // 日志本身坏了：删掉，别让它永远卡在这里
+      try {
+        await file.delete();
+      } catch (_) {}
+      return null;
+    }
+    final targetPath = (payload['target'] as String?) ?? '';
+    final names = (payload['entries'] as List?)?.map((e) => '$e').toList() ?? const [];
+    final target = Directory(targetPath);
+    final restored = <String>[];
+    final errors = <String>[];
+    if (targetPath.isNotEmpty) {
+      for (final name in names) {
+        final sourcePath = p.join(currentRoot.path, name);
+        if (FileSystemEntity.typeSync(sourcePath) != FileSystemEntityType.notFound) {
+          continue; // 这个条目没搬走
+        }
+        final movedPath = p.join(target.path, name);
+        final type = FileSystemEntity.typeSync(movedPath);
+        if (type == FileSystemEntityType.notFound) continue;
+        try {
+          await moveEntry(
+            type == FileSystemEntityType.directory ? Directory(movedPath) : File(movedPath),
+            sourcePath,
+          );
+          restored.add(name);
+        } catch (e) {
+          errors.add('$name: $e');
+        }
+      }
+    }
+    try {
+      await file.delete();
+    } catch (_) {}
+    return StorageRecovery(
+      targetPath: targetPath,
+      restoredEntries: List.unmodifiable(restored),
+      errors: List.unmodifiable(errors),
+    );
+  }
+
   /// 把 [sourceRoot] 下的资源条目搬到 [target]。
   ///
   /// 返回值中的 `ok=true` 只代表「文件已就位」，指针由调用方写；
@@ -114,6 +211,16 @@ class ResourceMigration {
     final check = await validate(target, currentRoot: sourceRoot);
     if (!check.ok) {
       return StorageMigrationResult.failure(check.message ?? '目标不可用');
+    }
+    // 空间预检：资源包 1 GB 起步，目标盘放不下时应该直接拒绝，
+    // 而不是搬到一半 ENOSPC 再回滚（回滚本身也要几分钟，还可能二次出错）。
+    // 同一块盘上的迁移不会因此误判：此时 freeBytes 就是这块盘的剩余空间。
+    final shortfall = spaceShortfall(
+      needBytes: (await usage(sourceRoot)).bytes,
+      freeBytes: await freeSpaceFor(target.path),
+    );
+    if (shortfall != null) {
+      return StorageMigrationResult.failure(shortfall);
     }
     final entries = <FileSystemEntity>[];
     for (final name in movableEntries) {
@@ -279,6 +386,21 @@ class StorageUsage {
     }
     return '${size.toStringAsFixed(size >= 100 ? 0 : 1)} ${units[unit]}';
   }
+}
+
+/// 启动自愈的结果。
+class StorageRecovery {
+  const StorageRecovery({
+    required this.targetPath,
+    required this.restoredEntries,
+    required this.errors,
+  });
+
+  final String targetPath;
+  final List<String> restoredEntries;
+  final List<String> errors;
+
+  bool get hasSomethingToReport => restoredEntries.isNotEmpty || errors.isNotEmpty;
 }
 
 class StorageMigrationResult {

@@ -220,6 +220,59 @@ Future<void> main() async {
     await onlineServer.stop();
     await upstream.close(force: true);
 
+    // ── 11) 对抗性：符号链接逃逸（资源目录里放一个指向 /etc/passwd 的链接）
+    final linkPath = '${root.path}/escape.txt';
+    try {
+      await Link(linkPath).create('/etc/passwd');
+    } catch (_) {}
+    final linkResp = await req(client, server.baseUri.resolve('escape.txt'));
+    final linkBody = await linkResp.transform(utf8.decoder).join();
+    check('符号链接不能逃出资源根', !linkBody.contains('root:x:'), 'HTTP ${linkResp.statusCode}');
+
+    // ── 12) 畸形 Range 不能崩，也不能返回错内容
+    for (final bad in ['bytes=abc-def', 'bytes=99999-', 'bytes=-0', 'items=0-1']) {
+      final r = await req(
+        client,
+        server.baseUri.resolve('assets/game.wasm'),
+        headers: {'range': bad},
+      );
+      final body = await r.fold<List<int>>(<int>[], (b, c) => b..addAll(c));
+      final okStatus = r.statusCode == 200 || r.statusCode == 206;
+      check('畸形 Range "$bad" 优雅处理', okStatus && body.isNotEmpty,
+          'HTTP ${r.statusCode} ${body.length}B');
+    }
+
+    // ── 13) 并发请求：不能串内容、不能崩
+    final results = await Future.wait(
+      List.generate(24, (i) async {
+        final r = await req(
+          client,
+          server.baseUri.resolve('assets/game.wasm'),
+          headers: {'range': 'bytes=$i-${i + 31}'},
+        );
+        final body = await r.fold<List<int>>(<int>[], (b, c) => b..addAll(c));
+        return (r.statusCode, body.length, body.isEmpty ? -1 : body.first);
+      }),
+    );
+    final allPartial = results.every((r) => r.$1 == 206 && r.$2 == 32);
+    final correctFirst = List.generate(24, (i) => i).every(
+      (i) => results[i].$3 == (i % 256),
+    );
+    check('24 个并发 Range 全部 206 且长度正确', allPartial, results.first);
+    check('并发下每个响应对应自己的区间', correctFirst);
+
+    // ── 14) 没有 </head> 的 HTML 也要注入到最前面
+    await File('${root.path}/bare.html').writeAsString('<html><body>bare</body></html>');
+    final bareResp = await req(client, server.baseUri.resolve('bare.html'));
+    final bareBody = await bareResp.transform(utf8.decoder).join();
+    check('无 head 的 HTML 也注入', bareBody.contains('/__pvz_'), bareBody.substring(0, 20));
+
+    // ── 15) 虚拟桥脚本不支持 HEAD 时不能挂掉
+    final headBridge = await req(client, server.baseUri.resolve(bridgePath), method: 'HEAD');
+    await headBridge.drain<void>();
+    check('桥脚本 HEAD 正常返回', headBridge.statusCode == 200 || headBridge.statusCode == 404,
+        headBridge.statusCode);
+
   } finally {
     client.close(force: true);
     await server.stop();

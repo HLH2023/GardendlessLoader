@@ -276,6 +276,7 @@ class AppController extends ChangeNotifier {
       if (token != _appSettings.deviceToken.trim()) return;
       _cloudSaves = snapshot;
     } on RemoteResourceFailure catch (failure) {
+      await _handleTokenRejected(failure);
       _cloudSavesError = failure.code;
       _appLogger.emit(
         level: LogLevel.warn,
@@ -516,6 +517,35 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// 云端明确拒绝了这个令牌（401/403）时的统一处理。
+  ///
+  /// 令牌被服务器吊销/过期后，继续留着它只会让所有云功能持续静默失败：
+  /// 界面显示「加载失败」，用户不知道要重新登录。这里清掉令牌 + 给明确提示。
+  /// 返回 true 表示已经按「登录失效」处理过。
+  Future<bool> _handleTokenRejected(Object error) async {
+    final code = error is RemoteResourceFailure ? error.code : '';
+    if (code != 'save_token_rejected') return false;
+    if (_appSettings.deviceToken.trim().isEmpty) return true; // 已经清过
+    // 复用登出流程：清令牌、清存档快照、删掉资源根里那份明文令牌桥文件
+    try {
+      await signOutAccount();
+    } catch (_) {}
+    _cloudSavesError = 'save_token_rejected';
+    _message = const LauncherMessage(
+      '登录状态已失效，请重新登录后再使用云端功能',
+      'save_token_rejected',
+    );
+    _appLogger.emit(
+      level: LogLevel.warn,
+      category: 'cloud.auth',
+      event: 'device_token_rejected',
+      outcome: LogOutcome.failed,
+      code: 'save_token_rejected',
+    );
+    notifyListeners();
+    return true;
+  }
+
   /// 退出登录：清掉设备令牌（服务器端令牌仍有效，需要时可在存档页吊销）。
   Future<void> signOutAccount() async {
     await _updateAppSettings(_appSettings.copyWith(deviceToken: '', deviceAccount: ''));
@@ -676,19 +706,36 @@ class AppController extends ChangeNotifier {
     final target = Directory(path.trim());
     _storageBusy = true;
     notifyListeners();
+    // 搬迁要几分钟，进程被系统杀掉/断电都可能：先落迁移日志，
+    // 下次启动才能把「搬走一半」的条目搬回来（见 recoverIfInterrupted）。
+    try {
+      await _pathsService.storage.migration.beginJournal(
+        sourceRoot: current.root,
+        target: target,
+        entries: List<String>.from(ResourceMigration.movableEntries),
+      );
+    } catch (e) {
+      _storageBusy = false;
+      notifyListeners();
+      return '切换存储位置失败：无法写入迁移日志（$e）';
+    }
     try {
       final result = await _pathsService.storage.migrate(
         sourceRoot: current.root,
         target: target,
       );
       if (!result.ok) {
+        await _pathsService.storage.migration.clearJournal(current.root);
         final detail = result.rollbackErrors.isEmpty
             ? ''
             : '（回滚异常：${result.rollbackErrors.join('；')}）';
         return '${result.error ?? '切换存储位置失败'}$detail';
       }
+      // 指针写入成功后才算迁移完成：这一步失败就必须保持日志，
+      // 让下次启动把条目搬回老根。
       _paths = await _pathsService.relocateTo(target);
       _storageFromConfigured = true;
+      await _pathsService.storage.migration.clearJournal(current.root);
       // 等价于从新位置重启：重新读取 manifest / 设置 / 日志
       await initialize();
       await refreshStorageUsage();
@@ -725,6 +772,16 @@ class AppController extends ChangeNotifier {
         final resolvedPaths = await _pathsService.ensureInitializedWithSource();
         _paths = resolvedPaths.paths;
         _storageFromConfigured = resolvedPaths.fromConfigured;
+        // 上次迁移若被打断，先把条目搬回当前根再继续（否则会出现
+        // 「一半在新位置、指针还在老位置」的半残状态）
+        final recovery = await _pathsService.storage.migration
+            .recoverIfInterrupted(_paths!.root);
+        if (recovery != null && recovery.restoredEntries.isNotEmpty) {
+          _message = LauncherMessage(
+            '上次更换存储位置未完成，已恢复 ${recovery.restoredEntries.length} 项资源',
+            'storage_migration_recovered',
+          );
+        }
         _emitInitializationStage('game_session_recovery');
         _gameSessionStore = GameSessionStore(_paths!.root);
         final exitResult = await _gameSessionStore!.consumeExitResult();
@@ -1553,6 +1610,8 @@ class AppController extends ChangeNotifier {
         context: <String, Object?>{'gameVersion': manifest.gameVersion ?? ''},
       );
     } catch (error) {
+      // 服务器拒绝令牌时一并清理登录态，否则在线形态会一直白屏式失败
+      await _handleTokenRejected(error);
       _appLogger.emit(
         level: LogLevel.warn,
         category: 'game.host',
@@ -1582,6 +1641,10 @@ class AppController extends ChangeNotifier {
       notifyListeners();
       throw StateError(failure);
     }
+    // 必须**先**确认服务器当前的游戏版本，再构造 session：
+    // session.gameVersion 会传给原生心跳（/_save/app/online/enter）和会话编解码，
+    // 用旧版本号上报会让在线登记挂到错的游戏版本上。
+    await _ensureOnlineGameVersion();
     final session = GameSession(
       sessionId: _newGameSessionId(),
       packageId: null,
@@ -1615,8 +1678,6 @@ class AppController extends ChangeNotifier {
       exportTemporaryRoot: Directory(p.join(paths.gpNextDir.path, '.exports')).path,
     );
     final store = _gameSessionStore ??= GameSessionStore(paths.root);
-    // 在线形态：先确认服务器当前的游戏版本，再生成桥与心跳里的版本号
-    await _ensureOnlineGameVersion();
     // 存档桥必须先落盘：原生侧从 appRoot 读它拿设备令牌
     await _prepareSaveBridge(paths.root);
     if (_appSettings.gestureHintShown == false && session.gestureHint != null) {
@@ -1642,6 +1703,24 @@ class AppController extends ChangeNotifier {
   /// 两种形态都经过 [LocalResourceServer]，页面 origin 固定是 127.0.0.1，
   /// 存档桥（设备令牌）注入方式相同 —— 这就是「存档行为一致」的实现基础。
   Future<DesktopGameLaunch> prepareDesktopGame() async {
+    // 桌面端的启动互斥：prepareDesktopGame 会起本地资源服务器 + CEF 窗口，
+    // 而 _desktopGameActive 要等服务器起来之后才置位，中间这段 await 里
+    // 连点两次「开始游戏」就会起两个服务器、两个窗口（端口与句柄都翻倍）。
+    if (_gameLaunchInFlight) {
+      throw StateError('正在启动游戏，请稍候');
+    }
+    if (_desktopGameActive) {
+      throw StateError('游戏已经在运行');
+    }
+    _gameLaunchInFlight = true;
+    try {
+      return await _prepareDesktopGameInternal();
+    } finally {
+      _gameLaunchInFlight = false;
+    }
+  }
+
+  Future<DesktopGameLaunch> _prepareDesktopGameInternal() async {
     final paths = _requirePaths();
     _message = null;
     final mode = playMode;
@@ -1679,6 +1758,22 @@ class AppController extends ChangeNotifier {
       bridgeScript: bridge,
       upstream: mode == PlayMode.online ? Uri.parse('$base/') : null,
     );
+    // 服务器已经占住端口和句柄：从这里往后的任何失败都必须停掉它
+    try {
+      return await _finishDesktopPrepare(server, bridge, mode, base);
+    } catch (_) {
+      await _stopOnlineHeartbeat();
+      await server.stop();
+      rethrow;
+    }
+  }
+
+  Future<DesktopGameLaunch> _finishDesktopPrepare(
+    LocalResourceServer server,
+    String bridge,
+    PlayMode mode,
+    String base,
+  ) async {
     if (mode == PlayMode.online) {
       _startOnlineHeartbeat();
     }

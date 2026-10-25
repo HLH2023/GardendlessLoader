@@ -1,8 +1,10 @@
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 
 import '../models.dart';
+import 'desktop_zip_extractor.dart';
 
 class ResourcePickerService {
   ResourcePickerService() {
@@ -54,6 +56,31 @@ class ResourcePickerService {
       );
     }
 
+    // 桌面端：用系统文件对话框挑 ZIP，再用 Dart 解压（原生通道不存在）
+    if (_isDesktopPlatform) {
+      final picked = await FilePicker.pickFiles(
+        dialogTitle: '选择资源包 ZIP',
+        type: FileType.custom,
+        allowedExtensions: const ['zip'],
+      );
+      // file_picker 13 的 pickFiles 直接返回 List<PlatformFile>（旧版是 FilePickerResult）
+      final path = picked.isEmpty ? null : picked.first.path;
+      if (path == null) return null;
+      await const DesktopZipExtractor().extract(
+        zipFile: File(path),
+        targetDirectory: targetDirectory,
+        onProgress: (files, bytes, total) {
+          onProgress?.call(ImportProgress(
+            phase: ImportPhase.extracting,
+            copiedFiles: files,
+            copiedBytes: bytes,
+            totalBytes: total,
+          ));
+        },
+      );
+      return targetDirectory;
+    }
+
     if (!_isSupportedPlatform) {
       throw ResourcePickerFailure(
         '当前平台不支持 ZIP 导入：$_platformName',
@@ -86,6 +113,22 @@ class ResourcePickerService {
     required Directory targetDirectory,
     ImportProgressCallback? onProgress,
   }) async {
+    // 桌面端没有原生解压通道：用 Dart 流式解压（带 zip-slip 防护）
+    if (_isDesktopPlatform) {
+      await const DesktopZipExtractor().extract(
+        zipFile: File(zipPath),
+        targetDirectory: targetDirectory,
+        onProgress: (files, bytes, total) {
+          onProgress?.call(ImportProgress(
+            phase: ImportPhase.extracting,
+            copiedFiles: files,
+            copiedBytes: bytes,
+            totalBytes: total,
+          ));
+        },
+      );
+      return targetDirectory;
+    }
     if (!_isSupportedPlatform) {
       throw ResourcePickerFailure(
         '当前平台不支持从服务器下载资源：$_platformName',
@@ -129,6 +172,12 @@ class ResourcePickerService {
       _platformName == 'android' ||
       _platformName == 'ios' ||
       _platformName == 'ohos';
+
+  /// 桌面端：有 Dart 解压路径，但没有原生目录选择通道。
+  bool get _isDesktopPlatform =>
+      _platformName == 'windows' ||
+      _platformName == 'linux' ||
+      _platformName == 'macos';
 
   static ImportProgress? _decodeProgress(Object? arguments) {
     if (arguments is! Map) {

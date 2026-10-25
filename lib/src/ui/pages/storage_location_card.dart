@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -214,6 +215,50 @@ class _StoragePickerDialogState extends State<_StoragePickerDialog> {
   }
 
   Future<void> _pickFolder() async {
+    // 安卓的 SAF 目录选择器经常返回 content:// URI（或直接 null），
+    // 那不是文件系统路径，Directory() 根本用不了。所以安卓走「候选目录」：
+    // 应用外部目录 + 各外置存储根，用户点一下就填进输入框，仍是真实路径。
+    if (Platform.isAndroid) {
+      final candidates = await _androidCandidatePaths();
+      if (!mounted) return;
+      if (candidates.isEmpty) {
+        setState(() => _check = const StorageCheck(
+              ok: false,
+              message: '取不到可用的存储目录，请手动输入绝对路径',
+            ));
+        return;
+      }
+      final picked = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => SimpleDialog(
+          title: Text(dialogContext.strings.storageDialogTitle),
+          children: [
+            for (final candidate in candidates)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(dialogContext).pop(candidate.path),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(candidate.label),
+                    const SizedBox(height: 2),
+                    Text(
+                      candidate.path,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: dialogContext.garden.inkMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      );
+      if (picked == null || !mounted) return;
+      setState(() => _path.text = picked);
+      await _validate();
+      return;
+    }
     try {
       final picked = await FilePicker.getDirectoryPath(
         dialogTitle: context.strings.storageDialogTitle,
@@ -225,6 +270,34 @@ class _StoragePickerDialogState extends State<_StoragePickerDialog> {
       if (!mounted) return;
       setState(() => _check = StorageCheck(ok: false, message: '无法打开目录选择器：$e'));
     }
+  }
+
+  /// 安卓候选存储位置：都是真实可写的绝对路径。
+  Future<List<({String label, String path})>> _androidCandidatePaths() async {
+    final results = <({String label, String path})>[];
+    Future<void> add(String label, Directory? dir) async {
+      if (dir == null) return;
+      final path = dir.path;
+      if (path.isEmpty || results.any((r) => r.path == path)) return;
+      results.add((label: label, path: path));
+    }
+
+    try {
+      await add('应用外部目录（默认，随应用卸载删除）',
+          await getExternalStorageDirectory());
+    } catch (_) {}
+    try {
+      // StorageDirectory 只有 music/podcasts/…/documents 这些媒体目录，
+      // 没有「存储根」。documents 在各外置卷上都存在且免额外权限，用它当基准。
+      final externals =
+          await getExternalStorageDirectories(type: StorageDirectory.documents);
+      var index = 1;
+      for (final dir in externals ?? const <Directory>[]) {
+        await add('外置存储 $index（卸载后仍保留）', Directory('${dir.path}/GardendlessLoader'));
+        index++;
+      }
+    } catch (_) {}
+    return results;
   }
 
   Future<void> _validate() async {
