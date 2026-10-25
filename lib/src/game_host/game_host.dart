@@ -76,6 +76,8 @@ class GameSession {
     this.mode = GameSessionMode.local,
     this.originOverride,
     this.appRoot,
+    this.gameVersion = '',
+    this.deviceId = '',
     required this.activationGeneration,
     required this.hasGpNext,
     required this.gpNextCompatible,
@@ -186,6 +188,12 @@ class GameSession {
   /// 启动器数据目录（存档桥文件所在的目录）。为空时由原生按资源槽的父目录推导。
   final String? appRoot;
 
+  /// 本次游玩的游戏版本（存档分区、在线会话心跳都要）。
+  final String gameVersion;
+
+  /// 在线会话心跳的设备标识（原生侧 enter/leave 要配对）。
+  final String deviceId;
+
   String get origin => originOverride ?? platform.origin;
 
   Uri get entryUri {
@@ -207,6 +215,8 @@ class GameSession {
       'platform': platform.wireName,
       'mode': mode.name,
       if (appRoot != null) 'appRoot': appRoot,
+      if (gameVersion.isNotEmpty) 'gameVersion': gameVersion,
+      if (deviceId.isNotEmpty) 'deviceId': deviceId,
       'origin': origin,
       'entryPath': entryPath,
       'entryUrl': entryUri.toString(),

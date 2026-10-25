@@ -36,6 +36,10 @@ data class NativeGameSession(
     /** 启动器数据目录：存档桥文件放在这里（与资源槽分开，见 appendSaveBridge）。 */
     val appRootPath: String,
     val mode: GameMode,
+    /** 存档按游戏版本隔离；在线会话心跳也带上它，服务端据此判断换版本是否安全。 */
+    val gameVersion: String = "",
+    /** 在线会话心跳的设备标识（与 Dart 侧一致，便于 enter/leave 配对）。 */
+    val deviceId: String = "",
     val origin: String,
     val entryUrl: String,
     val activationGeneration: Long,
@@ -104,6 +108,8 @@ object GameSessionCodec {
             resourceRoot = resourceRoot,
             appRootPath = appRootPath,
             mode = mode,
+            gameVersion = json.optionalString("gameVersion")?.trim().orEmpty(),
+            deviceId = json.optionalString("deviceId")?.trim().orEmpty(),
             origin = origin,
             entryUrl = entryUrl,
             activationGeneration = json.getLong("activationGeneration"),

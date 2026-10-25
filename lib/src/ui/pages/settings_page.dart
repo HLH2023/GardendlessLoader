@@ -11,6 +11,7 @@ import '../../services/app_settings_store.dart';
 import '../launcher_actions.dart';
 import '../theme/garden_theme.dart';
 import '../widgets/garden_widgets.dart';
+import '../widgets/token_login_dialog.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({
@@ -774,9 +775,19 @@ class _SaveServerPanelState extends State<_SaveServerPanel> {
             icon: Icons.login_rounded,
             tone: GardenButtonTone.primary,
             busy: controller.cloudLoginInProgress,
-            onPressed: controller.cloudLoginSupported && baseReady
-                ? () => unawaited(controller.loginWithAuthentik())
-                : null,
+            onPressed: !baseReady || controller.cloudLoginInProgress
+                ? null
+                : () async {
+                    if (controller.cloudLoginSupported) {
+                      // Android：原生登录闭环
+                      unawaited(controller.loginWithAuthentik());
+                      return;
+                    }
+                    // 桌面端：浏览器打开令牌签发页 → 粘贴回来
+                    await controller.openTokenIssuePage();
+                    if (!context.mounted) return;
+                    await showTokenLoginDialog(context, controller);
+                  },
           ),
           const SizedBox(height: 8),
           Text(

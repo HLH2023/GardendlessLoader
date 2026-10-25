@@ -47,6 +47,8 @@ class GameActivity : Activity() {
     private var pendingGpImportRequestId: String? = null
     private var pendingGpSelection: PendingGpSelection? = null
     private var returning = false
+    /** 在线形态的会话心跳；本地形态为 null。 */
+    private var onlineHeartbeat: OnlineSessionHeartbeat? = null
     @Volatile private var destroyed = false
     /** A ZIP opened from another app during play, handed to the launcher on return. */
     private var incomingZip: Uri? = null
@@ -133,6 +135,11 @@ class GameActivity : Activity() {
             )
         }
         webView.webChromeClient = GameChromeClient(::openFileChooser)
+        // 在线形态：会话心跳必须在原生维持 —— Dart 侧引擎随 MainActivity
+        // finish 一起销毁，定时器活不过一个 tick。
+        if (session.mode == GameMode.ONLINE) {
+            onlineHeartbeat = OnlineSessionHeartbeat.fromSession(session)?.also { it.start() }
+        }
         val viewport = GameViewportLayout(this, session.screenFit).apply {
             addView(webView)
         }
@@ -515,6 +522,9 @@ class GameActivity : Activity() {
     override fun onDestroy() {
         running = false
         destroyed = true
+        // 先注销在线会话，再拆 WebView：服务端据此立即允许换资源
+        onlineHeartbeat?.stop()
+        onlineHeartbeat = null
         pendingExport = null
         pendingGpSelection = null
         pendingGpImportRequestId = null

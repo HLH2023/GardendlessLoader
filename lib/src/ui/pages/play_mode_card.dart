@@ -5,6 +5,7 @@ import '../../l10n/app_strings.dart';
 import '../../services/app_settings_store.dart';
 import '../launcher_actions.dart';
 import '../theme/garden_theme.dart';
+import '../widgets/token_login_dialog.dart';
 import '../widgets/garden_widgets.dart';
 
 /// 游玩形态 + 全局登录卡片。
@@ -22,7 +23,10 @@ class PlayModeCard extends StatelessWidget {
     final palette = context.garden;
     final strings = context.strings;
     final mode = controller.playMode;
-    final busy = controller.busy || controller.storageBusy;
+    final busy = controller.busy ||
+        controller.storageBusy ||
+        controller.desktopGameActive ||
+        controller.gameLaunchInFlight;
 
     return SurfaceCard(
       child: Column(
@@ -128,7 +132,19 @@ class _AccountRow extends StatelessWidget {
           runSpacing: 8,
           children: [
             FilledButton.icon(
-              onPressed: controller.loginInProgress ? null : () => actions.loginWithAuthentik(),
+              onPressed: controller.loginInProgress
+                  ? null
+                  : () async {
+                      if (controller.cloudLoginSupported) {
+                        // Android：原生 LoginActivity 闭环
+                        await actions.loginWithAuthentik();
+                        return;
+                      }
+                      // 桌面端：先在浏览器打开令牌签发页，再粘贴回来
+                      await controller.openTokenIssuePage();
+                      if (!context.mounted) return;
+                      await showTokenLoginDialog(context, controller);
+                    },
               icon: controller.loginInProgress
                   ? const SizedBox(
                       width: 14,

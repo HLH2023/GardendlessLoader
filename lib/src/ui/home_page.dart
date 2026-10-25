@@ -543,14 +543,26 @@ class _HomePageState extends State<HomePage> {
         await _controller.finishDesktopGame(launch);
         return;
       }
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => DesktopGamePage(
-            launch: launch,
-            onClosed: () => _controller.finishDesktopGame(launch),
+      // 用 try/finally 兜住：push 本身失败（路由冲突、构建异常）时
+      // 也必须把本地服务器停掉，否则端口与文件句柄一直挂着。
+      var closedByPage = false;
+      try {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => DesktopGamePage(
+              launch: launch,
+              onClosed: () async {
+                closedByPage = true;
+                await _controller.finishDesktopGame(launch);
+              },
+            ),
           ),
-        ),
-      );
+        );
+      } finally {
+        if (!closedByPage) {
+          await _controller.finishDesktopGame(launch);
+        }
+      }
       return;
     }
     try {

@@ -91,6 +91,14 @@ class AppStrings {
   String get accountSignOut => _t('退出登录', 'Sign out');
   String get accountSignedOutDone => _t('已退出登录', 'Signed out');
   String get accountSignedInFallback => _t('已登录设备', 'Signed-in device');
+  String get accountSignedInDone => _t('登录成功', 'Signed in');
+  String get accountPasteTokenTitle => _t('粘贴设备令牌', 'Paste device token');
+  String accountPasteTokenHint(String url) => _t(
+        '浏览器已打开 $url —— 登录后页面会显示一串 pvz_ 开头的设备令牌，复制到下面。'
+            '令牌只用于本机保存，不会上传到别处。',
+        'The browser opened $url — after signing in it shows a pvz_… device token; '
+            'copy it below. The token stays on this device.',
+      );
   String get accountHint => _t(
         '登录后，云存档、资源下载、在线游玩与存档管理共用同一身份。',
         'One sign-in covers cloud saves, resource downloads, online play and save management.',

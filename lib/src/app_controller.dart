@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -462,21 +463,71 @@ class AppController extends ChangeNotifier {
   /// 当前游玩形态。
   PlayMode get playMode => _appSettings.playMode;
 
-  /// 在线形态是否可用：桌面端 + 已配置服务器。
+  /// 在线形态是否可用。
   ///
-  /// Android 的在线形态需要改原生 GameSession（当前只支持本地资源 origin），
-  /// 因此这里先只在桌面端开放，避免给出一个点了没反应的开关。
-  bool get onlinePlaySupported =>
-      isDesktopPlatform && _appSettings.effectiveServerBaseUrl.isNotEmpty;
+  /// 桌面端：配置了服务器即可（未登录也能玩，只是没有云存档）。
+  /// Android：还必须已登录 —— 在线资源走服务器 `/_save/online/`，该路由要
+  /// Bearer 设备令牌，未登录会 401，宁可提前拦住也不要让玩家看到白屏。
+  bool get onlinePlaySupported {
+    if (_appSettings.effectiveServerBaseUrl.isEmpty) return false;
+    if (isDesktopPlatform) return true;
+    if (Platform.isAndroid) return _appSettings.hasDeviceToken;
+    return false;
+  }
+
+  /// 启动是否正在进行（防重复进入：快捷键与按钮点击可能同时触发）。
+  bool _gameLaunchInFlight = false;
+  bool get gameLaunchInFlight => _gameLaunchInFlight;
+
+  /// 桌面端游戏窗口是否正在运行（迁移/切形态时必须让路）。
+  bool _desktopGameActive = false;
+  bool get desktopGameActive => _desktopGameActive;
 
   /// 是否具备开始游戏的条件（按形态判定）。
   bool get canStartGame => playMode == PlayMode.online
       ? onlinePlaySupported
       : hasCurrentResource;
 
+  /// 用系统默认浏览器打开设备令牌签发页（桌面端登录第一步）。
+  ///
+  /// Android 有内嵌登录闭环，不需要这个；桌面端没有内嵌页，只能借浏览器拿令牌。
+  Future<void> openTokenIssuePage() async {
+    final url = deviceTokenUrl;
+    if (url.isEmpty) return;
+    try {
+      if (Platform.isWindows) {
+        await Process.run('cmd', ['/c', 'start', '', url], runInShell: false);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', [url]);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', [url]);
+      } else {
+        await const MethodChannel('io.github.dey410.gardendlessloader/external_browser')
+            .invokeMethod<void>('open', <String, Object?>{'url': url});
+      }
+    } catch (error) {
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'cloud.login',
+        event: 'open_token_page_failed',
+        outcome: LogOutcome.failed,
+        error: error,
+      );
+    }
+  }
+
   /// 退出登录：清掉设备令牌（服务器端令牌仍有效，需要时可在存档页吊销）。
   Future<void> signOutAccount() async {
     await _updateAppSettings(_appSettings.copyWith(deviceToken: '', deviceAccount: ''));
+    // 存档页展示的是上一份快照：不清空就会把「别人的/已登出的」数据继续显示
+    _cloudSaves = null;
+    _saveHistory = <String, List<CloudSaveVersion>>{};
+    // 退出登录必须把这个明文令牌文件也抹掉：它躺在资源根目录里，
+    // 用户能改到任意位置，留着等于登出没登出。
+    final root = _paths?.root;
+    if (root != null) {
+      await _deleteFileQuietly(File(p.join(root.path, syncBridgeFileName)));
+    }
     _appLogger.emit(
       level: LogLevel.info,
       category: 'cloud',
@@ -486,9 +537,78 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 桌面端登录：用浏览器在签发页拿到设备令牌后粘贴进来。
+  ///
+  /// Android 有原生 LoginActivity 闭环（`cloudLoginSupported=true`）；桌面端没有
+  /// 内嵌登录页，所以走「浏览器签发 + 粘贴」这条路，校验 whoami 通过才落库，
+  /// 避免把一个错令牌存进去让所有云功能静默 401。
+  Future<String?> signInWithToken(String rawToken) async {
+    final token = rawToken.trim();
+    if (token.isEmpty) return '令牌不能为空';
+    if (!token.startsWith('pvz_')) return '令牌格式不对（应以 pvz_ 开头）';
+    final base = _appSettings.effectiveServerBaseUrl;
+    if (base.isEmpty) return '还没有配置服务器地址';
+    if (_loginInProgress) return '正在登录中，请稍候';
+    _loginInProgress = true;
+    _cloudLogin = const CloudLoginStatus(phase: CloudLoginPhase.verifying);
+    notifyListeners();
+    try {
+      final identity = await _remoteResourceService.fetchWhoami(
+        token: token,
+        baseUrl: base,
+      );
+      await _updateAppSettings(_appSettings.copyWith(
+        deviceToken: token,
+        deviceAccount: identity.user,
+      ));
+      // 换了身份，之前缓存的清单与存档快照都失效
+      _remoteManifest = null;
+      _remoteManifestFailure = null;
+      _cloudSaves = null;
+      _saveHistory = <String, List<CloudSaveVersion>>{};
+      _cloudLogin = const CloudLoginStatus(phase: CloudLoginPhase.succeeded);
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'cloud.login',
+        event: 'cloud_login_finished',
+        outcome: LogOutcome.succeeded,
+        context: <String, Object?>{
+          'stage': 'token_paste',
+          'server': maskedServerBase(base),
+          'accountKnown': identity.user.isNotEmpty,
+        },
+      );
+      notifyListeners();
+      return null;
+    } on RemoteResourceFailure catch (failure) {
+      _cloudLogin = CloudLoginStatus(
+        phase: CloudLoginPhase.failed,
+        errorCode: failure.code,
+        message: failure.message,
+      );
+      notifyListeners();
+      return failure.message;
+    } catch (error) {
+      _cloudLogin = CloudLoginStatus(
+        phase: CloudLoginPhase.failed,
+        errorCode: 'cloud_login_failed',
+        message: '$error',
+      );
+      notifyListeners();
+      return '$error';
+    } finally {
+      _loginInProgress = false;
+      notifyListeners();
+    }
+  }
+
   /// 切换游玩形态（立即持久化）。
   Future<void> setPlayMode(PlayMode mode) async {
     if (_appSettings.playMode == mode) return;
+    if (_storageBusy || isImporting || _desktopGameActive || _gameLaunchInFlight) {
+      // 形态决定「资源从哪来」，跑到一半切换会让当前会话的来源与设置不一致
+      return;
+    }
     await _updateAppSettings(_appSettings.copyWith(playMode: mode));
     _appLogger.emit(
       level: LogLevel.info,
@@ -545,6 +665,14 @@ class AppController extends ChangeNotifier {
     final current = _paths;
     if (current == null) return '应用尚未初始化';
     if (_storageBusy) return '正在迁移中，请稍候';
+    // 迁移会把资源槽整体搬走：游戏正在跑或正在导入时动手，会把正在读的
+    // 文件抽走（桌面端本地服务器、安卓原生 asset loader 都在读）。
+    if (_desktopGameActive || _gameLaunchInFlight) {
+      return '游戏正在运行，请先退出游戏再迁移';
+    }
+    if (isImporting) {
+      return '正在导入资源，请等导入完成再迁移';
+    }
     final target = Directory(path.trim());
     _storageBusy = true;
     notifyListeners();
@@ -993,6 +1121,14 @@ class AppController extends ChangeNotifier {
   }) async {
     final paths = _requirePaths();
     final manifestStore = _requireManifestStore();
+    // 导入会重置并切换资源槽：游戏正在跑（桌面端本地服务器/安卓原生 loader
+    // 正在读文件）或正在迁移存储位置时动手，会把正在读的目录抽走。
+    if (_desktopGameActive || _gameLaunchInFlight || _storageBusy) {
+      const failure = '游戏正在运行或正在迁移资源，请先退出游戏再导入';
+      _message = const LauncherMessage(failure, 'import_blocked_busy');
+      notifyListeners();
+      throw StateError(failure);
+    }
     final previousVersion = hasCurrentResource ? _currentGameVersion : null;
     _message = null;
     _busy = true;
@@ -1391,6 +1527,43 @@ class AppController extends ChangeNotifier {
     return (currentGameVersion ?? '').trim();
   }
 
+  /// 在线形态进入游戏前，尽力把服务器的资源清单拉下来。
+  ///
+  /// 存档按游戏版本分区：在线形态必须用**服务器当前那套资源**的版本号。
+  /// 如果只用户本地残留的版本（在线模式本来就不需要本地资源，常常是空的或过期的），
+  /// 存档会被记到错误的版本目录下 —— 表现为「在线玩了一晚上，本地进游戏看不到存档」。
+  /// 拉取失败不阻断启动：退化成当前已知版本，仅记录日志。
+  Future<void> _ensureOnlineGameVersion() async {
+    if (playMode != PlayMode.online) return;
+    if ((_remoteManifest?.gameVersion ?? '').trim().isNotEmpty) return;
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) return;
+    try {
+      final manifest = await _remoteResourceService.fetchManifest(
+        token: token,
+        baseUrl: base,
+      );
+      _remoteManifest = manifest;
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'game.host',
+        event: 'online_manifest_loaded',
+        outcome: LogOutcome.succeeded,
+        context: <String, Object?>{'gameVersion': manifest.gameVersion ?? ''},
+      );
+    } catch (error) {
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'game.host',
+        event: 'online_manifest_failed',
+        outcome: LogOutcome.failed,
+        code: 'online_manifest_unavailable',
+        error: error,
+      );
+    }
+  }
+
   /// 安卓在线形态启动。
   ///
   /// 在线形态必须已登录：`/_save/online/` 走 Bearer 鉴权（不用 authentik cookie，
@@ -1416,6 +1589,11 @@ class AppController extends ChangeNotifier {
       appRoot: paths.root.path,
       mode: GameSessionMode.online,
       originOverride: base,
+      // 原生侧用它们做在线会话心跳（Dart 定时器随引擎销毁活不下来）
+      gameVersion: _playGameVersion(),
+      deviceId: _appSettings.deviceAccount.trim().isEmpty
+          ? 'launcher'
+          : _appSettings.deviceAccount.trim(),
       platform: gameHostPlatform,
       // 服务端 /_save/online/ 是「游戏本体 + Bearer 鉴权 + 不注入脚本」的路由
       entryPath: '_save/online/index.html',
@@ -1437,13 +1615,17 @@ class AppController extends ChangeNotifier {
       exportTemporaryRoot: Directory(p.join(paths.gpNextDir.path, '.exports')).path,
     );
     final store = _gameSessionStore ??= GameSessionStore(paths.root);
+    // 在线形态：先确认服务器当前的游戏版本，再生成桥与心跳里的版本号
+    await _ensureOnlineGameVersion();
     // 存档桥必须先落盘：原生侧从 appRoot 读它拿设备令牌
     await _prepareSaveBridge(paths.root);
     if (_appSettings.gestureHintShown == false && session.gestureHint != null) {
       await _updateAppSettings(_appSettings.copyWith(gestureHintShown: true));
     }
     await store.prepare(session);
-    _startOnlineHeartbeat();
+    // 心跳不在这里起：MainActivity 拉起 GameActivity 后会 finish，Flutter 引擎
+    // 随之销毁，Dart 定时器活不过一个 tick。在线会话的心跳与注销由原生
+    // GameActivity 负责（见 OnlineGameResourceClient + GameActivity.startOnlineHeartbeat）。
     final operation = _appLogger.startOperation(
       operationId: _newOperationId('game-launch-online'),
       category: 'game.host',
@@ -1452,11 +1634,7 @@ class AppController extends ChangeNotifier {
       failureCode: 'game_host_launch_failed',
       gameSessionId: session.sessionId,
     );
-    try {
-      await operation.run(() => _gameHost.launch(session));
-    } finally {
-      await _stopOnlineHeartbeat();
-    }
+    await operation.run(() => _gameHost.launch(session));
   }
 
   /// 桌面端准备游戏：起本地服务器（本地资源 / 反代上游），返回要加载的地址。
@@ -1494,6 +1672,7 @@ class AppController extends ChangeNotifier {
       }
     }
 
+    await _ensureOnlineGameVersion();
     final bridge = await buildSaveBridgeScript();
     final server = await LocalResourceServer.start(
       root: resourceDirectory,
@@ -1503,6 +1682,8 @@ class AppController extends ChangeNotifier {
     if (mode == PlayMode.online) {
       _startOnlineHeartbeat();
     }
+    _desktopGameActive = true;
+    notifyListeners();
     _appLogger.emit(
       level: LogLevel.info,
       category: 'game.host',
@@ -1591,6 +1772,8 @@ class AppController extends ChangeNotifier {
 
   /// 桌面端游戏窗口关闭后收尾。
   Future<void> finishDesktopGame(DesktopGameLaunch launch) async {
+    _desktopGameActive = false;
+    notifyListeners();
     await _stopOnlineHeartbeat();
     await launch.server.stop();
     _appLogger.emit(
@@ -1604,6 +1787,26 @@ class AppController extends ChangeNotifier {
 
   Future<void> startGame() async {
     final paths = _requirePaths();
+    if (_gameLaunchInFlight) {
+      // 快捷键与按钮可能同时触发；重复进入会起两个资源服务器/两个窗口
+      return;
+    }
+    if (_storageBusy || isImporting) {
+      const failure = '正在迁移资源或导入资源，请稍候再开始游戏';
+      _message = const LauncherMessage(failure, 'launch_blocked_busy');
+      notifyListeners();
+      throw StateError(failure);
+    }
+    _gameLaunchInFlight = true;
+    try {
+      await _startGameInternal(paths);
+    } finally {
+      _gameLaunchInFlight = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _startGameInternal(AppPaths paths) async {
     _message = null;
 
     // ── 安卓在线形态 ──
@@ -2238,6 +2441,9 @@ class AppController extends ChangeNotifier {
           receivedBytes: zip.size,
           totalBytes: zip.size,
         );
+        // 导入完成后占用会变（旧槽被清、新槽写入）：刷新一次，
+        // 否则存储卡片上的数字会停留在导入前
+        await refreshStorageUsage();
       } else {
         // The import progress region explains a declined or failed import.
         _remoteDownload = RemoteDownloadStatus.idle;
@@ -2763,6 +2969,11 @@ class AppController extends ChangeNotifier {
     }
     try {
       await file.writeAsString(content, flush: true);
+      // 桥文件里有 `token:"pvz_..."` 明文：资源根可能位于用户自选目录，
+      // 落地即收紧到 0600（Windows 上 chmod 是空操作）。
+      if (!Platform.isWindows) {
+        await Process.run('chmod', ['600', file.path]);
+      }
     } catch (error, stackTrace) {
       _appLogger.emit(
         level: LogLevel.warn,

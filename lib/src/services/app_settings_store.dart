@@ -296,6 +296,20 @@ class AppSettingsStore {
       '${encoder.convert(settings.toJson())}\n',
       flush: true,
     );
+    // settings.json 里存着设备令牌。资源根目录现在可以由用户改到任意位置
+    // （包括网盘同步目录/共享盘），所以落地即收紧到 0600。
+    // Windows 上 chmod 是空操作，不会因此失败。
+    await _restrictPermissions(_temporaryFile);
     await _temporaryFile.rename(_file.path);
+    await _restrictPermissions(_file);
+  }
+
+  Future<void> _restrictPermissions(File file) async {
+    if (Platform.isWindows) return;
+    try {
+      await Process.run('chmod', ['600', file.path]);
+    } catch (_) {
+      // 权限收紧失败不该让设置保存整体失败
+    }
   }
 }
