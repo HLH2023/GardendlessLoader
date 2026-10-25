@@ -1008,6 +1008,7 @@
         "Windows zip：exe 版本资源含 0.9.0-hlh.23；190,024,520 B",
         "publish-apk/publish-windows -> manifest latest=90023，size/sha 与磁盘一致",
         "GitHub Release v0.9.0-hlh.23 创建（201），两个资产 state=uploaded",
+        "Chrome 真实浏览器：title=0.16.1 -> /load?gameVersion=0.16.1，window/sessionStorage 均回填 0.16.1",
         "Chrome 实测：冲突页下载/覆盖/本机上传（gameVersion=0.16.1）；Web 面板无独立上传、普通用户可上传当前版本",
         "Chrome 模拟原生触控消费：旧 UI 冲突条 0 次打开、关闭后 mask 仍 1；新 UI 全 1，iframe 内按钮可点"
       ],
