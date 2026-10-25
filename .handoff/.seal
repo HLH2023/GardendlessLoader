@@ -1,4 +1,4 @@
-sealedAt: 2026-10-25T13:56:10+0800
+sealedAt: 2026-10-25T13:57:32+0800
 6191b75a88ee79444e17a0797f1eb565fa4bf7d7c413153d3545c6b188f0a340  /home/hlh/dev/GardendlessLoader/.handoff/docs/01-architecture.md
 2723630f86caf8c8755ad8dc524038e8134ad5898ede2bc5db77ace4a41c4ad6  /home/hlh/dev/GardendlessLoader/.handoff/docs/02-branches.md
 f6c90a19ff862fa068fa973d6f88cd6eb5270e8f59ae1b865132d01288be5136  /home/hlh/dev/GardendlessLoader/.handoff/docs/03-versioning.md
@@ -8,8 +8,9 @@ f6c90a19ff862fa068fa973d6f88cd6eb5270e8f59ae1b865132d01288be5136  /home/hlh/dev/
 0380cb38c95842230159918207a5933910918ce95c54687f12d9cfa14400c050  /home/hlh/dev/GardendlessLoader/.handoff/docs/07-backlog.md
 23896d1c5aa11f5a9a3757907793cf5ca21a64cc8a62b0fde0e31d056ce3e967  /home/hlh/dev/GardendlessLoader/.handoff/docs/08-handoff-log.md
 b16b5698a7f963f0198bf73962a0aa8d536927f020f437e62ab228da209a2f43  /home/hlh/dev/GardendlessLoader/.handoff/HANDOFF.md
-8c126335b46b29a0a33fb5aea781dd74f16e8a90dd0e0efe64203d45f70e5148  /home/hlh/dev/GardendlessLoader/.handoff/prompts/01-start.md
+87a0af961e98a160dbe32b4eb738308e998d726e47ce23e0050f29e4ce8141ca  /home/hlh/dev/GardendlessLoader/.handoff/prompts/01-start.md
 f20ee44ddd962f156de8df8f46fdce50136c05ae485821981243faff3ac1fe25  /home/hlh/dev/GardendlessLoader/.handoff/prompts/02-return.md
+d2996322a1ce61b735e2e1ba11f21a4b5c1aaf90da234d6ac023d219e4d8d2a5  /home/hlh/dev/GardendlessLoader/.handoff/prompts/03-full.md
 817187333cf42037bb351baa12049991851c300d3058bc6da2c054fdf9fe1e42  /home/hlh/dev/GardendlessLoader/.handoff/PROTOCOL.md
 080408ef3f025ef9927d0c301b52da5eb027f87d2e479917ab9f89d2106c7a06  /home/hlh/dev/GardendlessLoader/.handoff/skills/gardendless-dev/SKILL.md
-163efb6c17390367bd4d7934487035425e10b2072652d2e2ac18bce6fd0de7b5  /home/hlh/dev/GardendlessLoader/.handoff/state.json
+41dfb4a06a79516affe2245996f2c1a9570a2f4614108fa038bb6f807ed02650  /home/hlh/dev/GardendlessLoader/.handoff/state.json

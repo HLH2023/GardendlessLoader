@@ -1,4 +1,5 @@
-读 `.handoff/HANDOFF.md`（主文档）→ `.handoff/PROTOCOL.md`（契约）→ `.handoff/docs/01`~`07`。
+读 `AGENTS.md`（范式与判定方法）→ `.handoff/PROTOCOL.md`（契约）→ `.handoff/HANDOFF.md`（主文档）→ 其指示的 `.handoff/docs/*`。
+需要更完整的开工说明时读 `.handoff/prompts/03-full.md`。
 
 你的任务：`.handoff/state.json` 里的 `task`（当前 R-20261025-01，hlh.17）。
 
