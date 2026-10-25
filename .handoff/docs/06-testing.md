@@ -1,13 +1,13 @@
 # 06 测试
 
-## 1. 基线：392 项（服务端 201 + 客户端 191）
+## 1. 基线：417 项（服务端 226 + 客户端 191）
 
 ```bash
-# 服务端（201 项）—— 在 /home/hlh/pvzge 下跑
-bash  tools/test-cloud-saves.sh      # 97  云端存档全链路（含吊销、鉴权边界、连接复用、会话令牌、自助面板、静态部署漂移）
+# 服务端（226 项）—— 在 /home/hlh/pvzge 下跑
+bash  tools/test-cloud-saves.sh      # 102 云端存档全链路（含吊销、鉴权边界、连接复用、会话令牌、自助面板、静态部署漂移、冲突面板动作）
 python3 tools/test-concurrency.py    # 19  并发写/锁/乐观版本号
-bash  tools/test-save-versions.sh    # 41  版本隔离 + 向下兼容迁移 + 回滚 + 历史保留策略
-node  tools/test-sync-offline.js     # 44  客户端 sync.js 沙盒（冲突/退避/401/回滚/Web 版本兜底）
+bash  tools/test-save-versions.sh    # 54  版本隔离 + 迁移 + 回滚 + 历史保留 + force/空档正反例
+node  tools/test-sync-offline.js     # 51  客户端 sync.js 沙盒（冲突阶段/保留本机/退避/401/回滚/Web 版本兜底）
 
 # 客户端（191 项）—— 在仓库根目录跑
 dart run tool/check_local_server.dart          # 43  本地服务器（注入/Range/穿越/软链/并发）

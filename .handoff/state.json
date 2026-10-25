@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
   "project": "GardendlessLoader",
-  "updatedAt": "2026-10-25T17:26:04+08:00",
+  "updatedAt": "2026-10-25T17:56:13+08:00",
   "updatedBy": "orchestrator/opencode",
   "release": {
-    "versionName": "0.9.0-hlh.23",
-    "versionCode": 90023,
-    "apkSha256": "8e6858b62c9c2e4fd5c7a17de4b47b5185139204c6d6d76c7276605309151d17",
-    "apkBytes": 58634998,
-    "windowsSha256": "66a106484b036eb7ea846f1183a14766672104fd0fe8802f36b133885a302f25",
-    "windowsBytes": 190024520,
-    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.23",
+    "versionName": "0.9.0-hlh.24",
+    "versionCode": 90024,
+    "apkSha256": "cdf5a52ccd9ea09c70a2c1c36643648f80c9288d85c69943e203438050d7f248",
+    "apkBytes": 58635013,
+    "windowsSha256": "7b6990761e56ee4d8c04a2c91d1cde3eabe46d7cfb89811718da1c739d3f15b0",
+    "windowsBytes": 190024526,
+    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.24",
     "pendingPublish": false
   },
   "branches": {
@@ -36,14 +36,14 @@
     }
   },
   "tests": {
-    "server": 201,
+    "server": 231,
     "client": 191,
-    "total": 392,
+    "total": 422,
     "suites": [
       {
         "name": "server/cloud-saves",
         "cmd": "bash tools/test-cloud-saves.sh",
-        "count": 97
+        "count": 102
       },
       {
         "name": "server/concurrency",
@@ -53,12 +53,12 @@
       {
         "name": "server/save-versions",
         "cmd": "bash tools/test-save-versions.sh",
-        "count": 41
+        "count": 54
       },
       {
         "name": "server/sync-offline",
         "cmd": "node tools/test-sync-offline.js",
-        "count": 44
+        "count": 56
       },
       {
         "name": "client/local-server",
@@ -88,19 +88,20 @@
     ]
   },
   "task": {
-    "id": "R-20261025-02",
-    "title": "hlh.23：存档面板 Web/Windows/Android 修复",
+    "id": "R-20261025-03",
+    "title": "hlh.24：存档冲突直接可操作 + App 面板下载导出桥",
     "status": "review",
-    "dispatchedAt": "2026-10-25T17:27:14+08:00",
+    "dispatchedAt": "2026-10-25T17:55:38+08:00",
     "dispatchedBy": "user",
-    "acceptedAt": "2026-10-25T17:27:14+08:00",
+    "acceptedAt": "2026-10-25T17:55:38+08:00",
     "acceptedBy": "orchestrator/opencode",
     "brief": "见 .handoff/HANDOFF.md 第 3 节",
     "scope": [
-      "Web 存档版本分区、冲突页下载、管理页手动上传当前版本、静态部署一致性",
-      "Android 游戏内面板触控（点击/关闭）与 iframe 绝对地址",
-      "Windows/App 面板同步验证",
-      "版本 0.9.0-hlh.23 双端构建、发布与回执"
+      "游戏内冲突直接弹出面板：本机/云端摘要、下载最新云端、保留本机并上传、启动阶段覆盖本机、稍后处理",
+      "保留本机上传带 force 与 gameVersion，并以服务端实际 saved 为准，零接受不假装成功",
+      "App 管理页跨源下载经 postMessage 交给游戏页导出",
+      "冲突面板触控放行与测试基线补齐",
+      "版本 0.9.0-hlh.24 双端构建、发布与回执"
     ],
     "outOfScope": [
       "改动 upstream(Dey410) 分支或向上游提 PR",
@@ -1105,6 +1106,125 @@
         "无（服务端静态文件已部署；双端与 Release 已发布）"
       ],
       "verifyOutput": "== 文件齐备 ==\n  ok   存在 .handoff/PROTOCOL.md\n  ok   存在 .handoff/HANDOFF.md\n  ok   存在 .handoff/state.json\n  ok   存在 .handoff/docs/01-architecture.md\n  ok   存在 .handoff/docs/02-branches.md\n  ok   存在 .handoff/docs/03-versioning.md\n  ok   存在 .handoff/docs/04-build.md\n  ok   存在 .handoff/docs/05-deployment.md\n  ok   存在 .handoff/docs/06-testing.md\n  ok   存在 .handoff/docs/07-backlog.md\n  ok   存在 .handoff/docs/08-handoff-log.md\n  ok   存在 .handoff/prompts/01-start.md\n  ok   存在 .handoff/prompts/02-return.md\n  ok   存在 .handoff/skills/gardendless-dev/SKILL.md\n\n== state.json 结构 ==\n  ok   OK review suites= 9 total= 392\n\n== 回执完整性 ==\n  ok   OK 8 条回执字段完整\n\n== 敏感信息扫描（.handoff + AGENTS.md + tools/handoff.sh） ==\n  ok   未发现服务器地址/令牌字面量\n\n== 源码敏感扫描（lib/tool/android/.github/pubspec/docs） ==\n  ok   源码与配置未出现服务器地址/令牌\n\n== AGENTS.md 只放持久信息 ==\n  ok   未出现版本号/任务号/测试数字/哈希等易变事实\n\n== Windows 构建脚本编码 ==\n  ok   build-windows.ps1 为 UTF-8 BOM + CRLF（bom-ok crlf=70 lf_only=0）\n\n== 短提示词长度 ==\n  ok   01-start.md 共 9 行（≤14）\n\n== 技能安装 ==\n  ok   已装入 opencode 全局 skills\n\n结果：22 通过 / 0 失败 / 0 警告"
+    },
+    {
+      "taskId": "R-20261025-03",
+      "by": "orchestrator/opencode",
+      "at": "2026-10-25T17:55:38+08:00",
+      "status": "review",
+      "readBack": {
+        "taskTitle": "hlh.24：存档冲突直接可操作 + App 面板下载导出桥",
+        "versionBefore": "0.9.0-hlh.23+90023",
+        "testsBaseline": "392 项（服务端 201 + 客户端 191）",
+        "versionAfter": "0.9.0-hlh.24+90024",
+        "testsAfter": "422 项（服务端 231 + 客户端 191）"
+      },
+      "changed": [
+        "服务端 sync.js：冲突提示加 phase=startup|runtime；暴露 __pvzSave.keepLocal；force 上传带 gameVersion；只按服务端 saved 推进 meta/清 pending，零接受发 failed",
+        "服务端 ui.js：冲突打开即弹面板（本机/云端摘要、下载云端 JSON、保留本机并上传、启动阶段覆盖本机、稍后处理/重开横幅）；运行中隐藏覆盖；resolved/failed 事件收口；data-pvz-ui",
+        "服务端 admin.html：App iframe 下载改 postMessage 给游戏页，复用 Blob/导出补丁",
+        "服务端 make-app-sync.py：App 启动冲突标记 phase=startup",
+        "服务端测试：cloud +5（面板动作/导出桥/静态漂移）、versions +13（force 与空档正反例）、sync +12（phase、keepLocal、零接受）",
+        "客户端 touch_input_adapter.js：冲突面板 id 加入旧脚本兜底放行列表",
+        "客户端 docs/acceptance-android.md：3.9/3.10 增加冲突面板与 App 下载桥验收项",
+        "客户端 pubspec.yaml：0.9.0-hlh.23+90023 → 0.9.0-hlh.24+90024"
+      ],
+      "commands": [
+        "bash tools/test-cloud-saves.sh → 102 通过 / 0 失败 / 0 跳过",
+        "python3 tools/test-concurrency.py → 19 通过 / 0 失败",
+        "bash tools/test-save-versions.sh → 54 通过 / 0 失败",
+        "node tools/test-sync-offline.js → 56 通过 / 0 失败",
+        "dart run tool/check_local_server.dart → 43 通过 / 0 失败",
+        "dart run tool/check_storage_migration.dart → 63 通过 / 0 失败",
+        "dart run tool/check_desktop_zip.dart /tmp/opencode/pack.zip → 11 通过 / 0 失败",
+        "dart run tool/check_game_host_contract.dart → 47 通过 / 0 失败",
+        "dart run tool/check_update_manifest.dart → 27 通过 / 0 失败",
+        "flutter analyze → No issues found!",
+        "cd android && JAVA_HOME=/home/hlh/jdk17 ./gradlew :app:testDebugUnitTest --tests '*GameViewportSizeTest*' → BUILD SUCCESSFUL（4 项）",
+        "node tool/check_touch_patch.mjs → touch input adapter contract passes",
+        "bash tools/deploy-static.sh --check → 9 个文件一致",
+        "Chromium 探针：冲突面板自动打开/摘要/下载/保留/运行中隐藏覆盖；App 面板启动与运行冲突；app-admin 下载桥 postMessage 均通过"
+      ],
+      "tests": {
+        "analyze": "No issues found",
+        "total": 422,
+        "suites": [
+          {
+            "name": "server/cloud-saves",
+            "passed": 102,
+            "failed": 0
+          },
+          {
+            "name": "server/concurrency",
+            "passed": 19,
+            "failed": 0
+          },
+          {
+            "name": "server/save-versions",
+            "passed": 54,
+            "failed": 0
+          },
+          {
+            "name": "server/sync-offline",
+            "passed": 56,
+            "failed": 0
+          },
+          {
+            "name": "client/local-server",
+            "passed": 43,
+            "failed": 0
+          },
+          {
+            "name": "client/storage-migration",
+            "passed": 63,
+            "failed": 0
+          },
+          {
+            "name": "client/desktop-zip",
+            "passed": 11,
+            "failed": 0
+          },
+          {
+            "name": "client/game-host-contract",
+            "passed": 47,
+            "failed": 0
+          },
+          {
+            "name": "client/update-manifest",
+            "passed": 27,
+            "failed": 0
+          }
+        ],
+        "androidJvm": {
+          "passed": 4,
+          "failed": 0
+        }
+      },
+      "artifacts": [
+        {
+          "path": "build/app/outputs/flutter-apk/app-release.apk",
+          "bytes": 58635013,
+          "sha256": "cdf5a52ccd9ea09c70a2c1c36643648f80c9288d85c69943e203438050d7f248",
+          "signed": "v1+v2+v3"
+        },
+        {
+          "path": "/tmp/opencode/windows-hlh24.zip",
+          "bytes": 190024526,
+          "sha256": "7b6990761e56ee4d8c04a2c91d1cde3eabe46d7cfb89811718da1c739d3f15b0"
+        },
+        {
+          "path": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.24",
+          "bytes": 0,
+          "sha256": ""
+        }
+      ],
+      "remaining": [
+        "安卓真机复核：冲突面板按钮/关闭/重开、「保留本机并上传」结果、App 面板单条下载是否落到系统导出目录（用户执行）",
+        "Windows 首次原地更新后复核「存档」面板与下载导出（用户执行）",
+        "Web 首次按版本加载仍会把 legacy 迁移到当前游戏版本；若本机较新会触发一次冲突，属预期"
+      ],
+      "needsHermes": [],
+      "verifyOutput": "22 通过 / 0 失败 / 0 警告"
     }
   ],
   "handoffLog": [
@@ -1177,6 +1297,13 @@
       "event": "save-panel-fix",
       "task": "R-20261025-02",
       "note": "hlh.23：Web 版本分区/冲突页下载/静态部署一致性 + Android 触控与 iframe 修复；392 项全绿并发布"
+    },
+    {
+      "at": "2026-10-25T17:55:38+08:00",
+      "by": "orchestrator/opencode",
+      "event": "conflict-ux-release",
+      "task": "R-20261025-03",
+      "note": "hlh.24：冲突直接弹面板（下载/保留本机/启动覆盖）+ App 面板下载导出桥；422 项全绿并发布"
     }
   ]
 }

@@ -515,3 +515,65 @@
   自动更新后打开「存档」面板确认 iframe 有内容。
 - Web 首次按版本加载会把 legacy 迁移到 0.16.1；若本机比云端新会进冲突页，
   这是预期行为，先下载云端 JSON 再决定。
+
+## R-20261025-03（存档冲突直接可操作 + App 面板下载桥）/ orchestrator(opencode) / 2026-10-25T17:55+08:00
+
+- status: review
+- 版本: `0.9.0-hlh.23+90023` → `0.9.0-hlh.24+90024`
+
+### 现象 → 根因 → 改法 → 断言
+
+#### 冲突提示只给入口，不能直接处理（P0）
+- **现象**：游戏内冲突只显示「本次以本机为准」横幅，用户要自己点进存档面板找
+  下载/覆盖，实际就是「看着冲突没法动」。
+- **根因**：冲突状态只挂 `window.__pvzConflictNotice` 并渲染一条横幅，没有把
+  `/load` 的云端内容与可执行动作接到提示上。
+- **改法**：`ui.js` 新冲突面板（本机/云端摘要、版本/设备/时间、下载云端 JSON、
+  保留本机并上传、启动阶段覆盖本机、稍后处理/重开横幅）；`sync.js` 给提示加
+  `phase: startup|runtime`；运行中隐藏覆盖按钮，启动阶段才允许覆盖并 reload。
+  「保留本机」走 `__pvzSave.keepLocal()`，成功后发 `pvz-save-conflict-resolved`
+  关面板，失败发 `failed` 并显示服务端原因。
+- **断言**：cloud 套件 +5（面板动作/导出桥/静态一致）；sync 套件 +12（phase、
+  keepLocal 的 force/gameVersion、零接受）；Chromium 探针自动打开、摘要、
+  下载、保留、运行中隐藏覆盖全部通过。
+
+#### 保留本机上传 200 但零接受仍报成功（P1，本轮新发现）
+- **根因**：`forceUploadLocal` 只判断 `x.status === 200`，未看服务端 `saved`。
+  单键超限/空档保护时服务端返回 200 + `saved: []`，客户端却清 pending、推进
+  meta、发 resolved，改动会静默丢失且不再重试。
+- **改法**：按 `saved` 计算真正被接受的键，只对它们推进 meta/清 pending；
+  零接受发 `failed` 并保留冲突提示；部分接受保留其余改动，下次同步重试。
+  老服务端不返回 `saved` 时按全部接受处理，保持兼容。
+- **断言**：`tools/test-sync-offline.js` [15] 5 条（不发 resolved、failed 带原因、
+  保留提示、meta 不前进、本机改动仍在）。
+
+#### App 面板单条下载在 Android 无反应（P1）
+- **根因**：面板是跨源 iframe，`<a download>` 只在游戏页被
+  `export_download_patch.js` 接管；Android WebView 没有 DownloadListener。
+- **改法**：app-admin.html 检测 `__PVZGE_APP__` + 跨源父窗口，改为
+  `postMessage({type:'pvz-export', name, text})`；游戏页校验 `e.origin` 等于
+  配置的服务器 origin 后再走同一个 Blob/导出补丁。
+- **断言**：cloud 套件「App 管理页下载走游戏页导出桥」；Chromium iframe 探针
+  收到 `pvz-export` 且内容与存档一致。
+
+#### 冲突面板按钮可能被原生触控层吞掉（回归防守）
+- **改法**：原生 `touch_input_adapter.js` 把 `pvz-conflict-modal` 加进旧脚本
+  id 兜底放行列表；面板本身带 `data-pvz-ui`。
+- **断言**：`tool/check_touch_patch.mjs` 通过；Chromium 模拟 document 捕获消费
+  时启动/运行两种冲突面板按钮均一次点中。
+
+### 验证（实测）
+- 服务端 **231 通过 / 0 失败**：cloud 102、concurrency 19、versions 54、sync 56。
+- 客户端 **191 通过 / 0 失败**；`flutter analyze` 干净；Android JVM 视口 4 项。
+- `bash tools/deploy-static.sh --check`：9 个文件全部一致。
+- Chromium 探针：Web 冲突面板、App 启动/运行冲突面板、app-admin 下载桥全部通过。
+
+### 产物
+- APK 58,635,013 B `cdf5a52ccd9ea09c70a2c1c36643648f80c9288d85c69943e203438050d7f248`（v1+v2+v3）
+- Windows zip 190,024,526 B `7b6990761e56ee4d8c04a2c91d1cde3eabe46d7cfb89811718da1c739d3f15b0`
+- Release `v0.9.0-hlh.24` 两个资产已上传；服务端 `95defc2` 已推送。
+
+### 遗留
+- 真机复核：冲突面板下载/保留/关闭/重开一次点中；「保留本机并上传」后云端历史
+  有旧版；App 面板单条下载落到系统导出目录。
+- Windows 首次原地更新后复核面板与下载导出。
