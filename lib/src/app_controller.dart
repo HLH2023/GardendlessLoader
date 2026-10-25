@@ -328,7 +328,8 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       final versions = await _remoteResourceService.fetchSaveHistory(
-        gameVersion: _playGameVersion(),
+        // 用 /load 实际返回的分区（可能是 legacy），而不是请求的版本。
+        gameVersion: _cloudSaves?.gameVersion ?? _playGameVersion(),
         token: token,
         baseUrl: base,
         user: user,
@@ -376,6 +377,7 @@ class AppController extends ChangeNotifier {
         key: key,
         ts: ts,
         name: name,
+        gameVersion: _cloudSaves?.gameVersion ?? _playGameVersion(),
       );
       _saveRestoreMessage = 'save_restore_done';
       _appLogger.emit(

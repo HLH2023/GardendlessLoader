@@ -317,9 +317,11 @@ class AppStrings {
   String get saveManager => _t('存档管理', 'Save manager');
   String get savesTitle => _t('云端存档', 'Cloud saves');
   String get savesSubtitle => _t(
-        '这里读的是服务器上的存档状态。回滚只改云端，重启游戏后才会同步到本机。',
-        'This page reads what the server holds. Rolling back changes the cloud '
-            'copy only; it reaches this device the next time the game starts.',
+        '本页只读取云端存档；自动上传只发生在游戏运行期间。回滚只改云端，'
+            '重启游戏后才会同步到本机。',
+        'This page only reads the cloud saves; uploads happen while the game is '
+            'running. Rolling back changes the cloud copy only; it reaches this '
+            'device the next time the game starts.',
       );
   String get savesAccount => _t('账号', 'Account');
   String get savesLastSync => _t('最后同步', 'Last write');
@@ -343,8 +345,9 @@ class AppStrings {
   String get savesHistoryHide => _t('收起历史', 'Hide versions');
   String get savesHistoryEmpty => _t('这个存档还没有历史版本。', 'No versions yet.');
   String get savesHistoryForbidden => _t(
-        '查看历史版本需要管理员权限：该入口仅在 authentik 的 Admins 组可见。',
-        'Version history needs the authentik Admins group.',
+        '读取历史版本失败：请确认已登录，且这份存档属于当前账号。',
+        'Could not read versions. Check that you are signed in and the save '
+            'belongs to this account.',
       );
   String get savesRestore => _t('回滚', 'Roll back');
   String get savesRestoreConfirmTitle => _t('回滚云端存档？', 'Roll back the cloud save?');
@@ -364,11 +367,11 @@ class AppStrings {
   String get savesRestoreFailed => _t('回滚失败', 'Roll back failed');
   String get savesWrittenBy => _t('最后写入', 'Last written by');
   String get savesUploadHint => _t(
-        '本机存档正在游戏里自动上传（约 3 秒防抖）；想立刻推一次，进游戏点右下角「↑ 上传」。'
-        '这页读不到游戏 WebView 里的数据，所以只能看云端这一侧。',
-        'This device uploads automatically from inside the game (3 s debounce). '
-            'To push right now, open the game and tap the "↑ Upload" button. '
-            'This page can only see the cloud side.',
+        '自动上传只在游戏运行中发生（约 3 秒防抖）；启动器不会上传本机数据。'
+        '游戏内右下角「存档」可打开与 Web 端一致的存档管理界面。',
+        'Uploads only happen while the game is running (3 s debounce); the '
+            'launcher never uploads this device. The in-game "Saves" button '
+            'opens the same manager as the web client.',
       );
   String get savesPlayer => _t('玩家', 'Player');
   String get savesCoin => _t('金币', 'Coins');

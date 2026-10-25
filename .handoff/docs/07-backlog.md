@@ -32,14 +32,6 @@
 
 （本轮无未决 P1：B-05 / B-08 已关闭，见文末「已关闭」。）
 
-### B-18 管理页看不到按版本分区的存档
-- 现象：`/list` 只扫用户目录根下的 `*.json`（legacy），`by-version/<gv>/` 完全不出现在管理页；
-  `/history`、`/version`、`/restore` 虽已支持 `gameVersion`，但页面从不传。
-- 影响：1.6.x 之后的存档在管理页不可见，回滚只能靠手写 API 调用。
-- 要做：`/list` 增加按版本聚合（返回 `gameVersion` 维度）；管理页加载历史/下载/回滚时带上
-  该版本；`/delete` 增加版本参数校验。
-- 判据：`test-cloud-saves.sh` 增加「按版本列表 → 历史 → 回滚」三段断言，管理页能切换版本。
-
 ## P2
 
 - B-10 `pvzge-auth` 容器已停但 compose 定义仍在（宿主重启可能复活）。
@@ -107,3 +99,11 @@ robocopy 覆盖 → 失败自动回滚并重启 → 清理。安装目录不可�
 重新 fetch 后 git grep 全历史 0 命中；本地 refs/original 已删、reflog 过期、gc --prune=now。
 注意：GitHub 仍可能按旧 commit SHA 缓存对象，若要求彻底不可达需向 GitHub Support 申请 purge；
 域名本身不是凭据（仍需 authentik + Bearer），当前达标线是「源码与可达历史均无字面量」。`
+
+`B-18 管理页看不到按版本分区的存档 → 已关闭（hlh.20）→
+`/list` 改为返回 `saves[]`（legacy + 每个 by-version），普通用户只返回本人；
+`/history`、`/version`、`/raw` 允许本人读取，跨用户仍需管理员；管理页按
+`gameVersion` 展示并传递历史/回滚/下载/删除参数。游戏内「存档」按钮对所有
+用户挂载，打开同一套面板。
+断言：test-cloud-saves.sh 7.9 节 3 条（自助列表、跨用户 403、本人历史 200）+
+8.5 节 4 条（我的存档、data-gv、按钮全员挂载、无独立上传按钮）。`

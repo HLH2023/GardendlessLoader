@@ -12,6 +12,7 @@
 import 'dart:io';
 
 import 'package:gardendless_loader/src/game_host/game_exit_result.dart';
+import 'package:gardendless_loader/src/services/cloud_save_service.dart';
 import 'package:gardendless_loader/src/services/remote_resource_service.dart';
 
 int passed = 0;
@@ -259,6 +260,40 @@ void main() {
       File('lib/src/services/windows_updater.dart')
           .readAsStringSync()
           .contains('p.rootPrefix(target.path)'),
+      null);
+
+  // 存档面板显示的是 /load 实际返回的分区（可能是 legacy）。历史/回滚
+  // 必须沿用这个分区，否则页面有数据、历史却查空。
+  final legacySnapshot = CloudSaveSnapshot.fromJson(<String, Object?>{
+    'user': 'u',
+    'gameVersion': '',
+    'is_admin': false,
+    'mtime': <String, Object?>{'PvZ2_PlayerProperties': 1},
+    'summary': <String, Object?>{},
+    'device': <String, Object?>{},
+    'server_ts': 1,
+  });
+  check('快照保留服务端实际分区（legacy）', legacySnapshot.gameVersion.isEmpty,
+      legacySnapshot.gameVersion);
+  final versionedSnapshot = CloudSaveSnapshot.fromJson(<String, Object?>{
+    'user': 'u',
+    'gameVersion': '0.16.1',
+    'is_admin': false,
+    'mtime': <String, Object?>{'PvZ2_PlayerProperties': 1},
+    'summary': <String, Object?>{},
+    'device': <String, Object?>{},
+    'server_ts': 1,
+  });
+  check('快照保留服务端实际分区（版本号）',
+      versionedSnapshot.gameVersion == '0.16.1', versionedSnapshot.gameVersion);
+  check('历史与回滚用快照分区而不是请求版本',
+      controllerSource.contains('_cloudSaves?.gameVersion') &&
+          controllerSource.contains('gameVersion: _cloudSaves?.gameVersion'),
+      null);
+  check('存档页不再按管理员隐藏历史/回滚',
+      !File('lib/src/ui/pages/saves_page.dart')
+          .readAsStringSync()
+          .contains('canManage: snapshot.isAdmin'),
       null);
 
   stdout.writeln('\n结果：$passed 通过 / $failed 失败');

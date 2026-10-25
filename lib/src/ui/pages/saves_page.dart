@@ -128,7 +128,9 @@ class _SavesPageState extends State<SavesPage> {
                     _SaveEntryCard(
                       controller: controller,
                       entry: entry,
-                      canManage: snapshot.isAdmin,
+                      // 页面只展示当前账号；服务端已允许本人查看历史与回滚，
+                      // 不再要求 authentik Admins 组。
+                      canManage: true,
                       expanded: _expanded.contains(entry.key),
                       onToggleHistory: () {
                         setState(() {

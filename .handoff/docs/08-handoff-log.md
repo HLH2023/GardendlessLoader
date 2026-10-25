@@ -362,3 +362,62 @@
 ### 遗留
 - B-18（新增）：管理页只显示 legacy 存档，按版本分区的存档不可见。
 - 安卓真机验收与 Windows 首次自动更新仍需用户点击。
+
+## R-20261025-01（hlh.20 存档页）/ orchestrator(opencode) / 2026-10-25T15:45+08:00
+
+- status: review
+- 版本: `0.9.0-hlh.19+90019` → `0.9.0-hlh.20+90020`
+- 触发：安卓实机反馈——下载新资源包后存档页 0 条、冲突提示没有入口、
+  游戏内「上传」按钮点不动、21:9 面板拥挤
+
+### 现象 → 根因 → 改法 → 断言
+
+#### 存档页 0 条（P0）
+- **现象**：云端截图显示 `akadmin`、0 条目；游戏内却提示存档冲突。
+- **根因**：客户端按资源包版本请求 `/load?gameVersion=0.16.1`，而该账号的 4 份
+  存档都在**未分区**（legacy）目录。`pick_load_version` 只把 `by-version/*`
+  当作可继承来源，legacy 被排除 → 返回 `kind=none`、`data={}`；游戏页的
+  `gameVersion` 为空，仍在往 legacy 写，两边永远对不上。
+- **改法**：legacy 作为「最旧来源」参与继承，命中时返回 `load_kind=migrated`。
+- **断言**：test-save-versions.sh 第 9 节 6 条（migrated、内容、adoptable、冲突标记）。
+
+#### 普通用户看不到历史/回滚（P0）
+- **现象**：页面只有 0 条；即便有数据，历史按钮也因 `snapshot.isAdmin` 被隐藏。
+- **根因**：`/history`、`/version`、`/raw` 一律要求管理员；管理页对非管理员直接
+  显示「需要 Admins 组」。游戏内 FAB 也只在 `d.is_admin` 时挂载。
+- **改法**：三接口允许本人（跨用户仍需管理员）；`/list` 非管理员只返回本人，
+  并新增 `saves[]`（legacy + 各版本）；管理页按 `gameVersion` 操作；FAB 全员挂载。
+- **断言**：test-cloud-saves.sh 7.9 节 3 条 + 8.5 节 5 条。
+
+#### 游戏内「上传」按钮点不动（P1）
+- **现象**：右下角只有「↑ 上传」，普通账号没有管理面板；按钮与面板职责混乱。
+- **改法**：移除独立上传按钮；自动上传只由 `sync.js` 在游戏运行时执行；
+  右下角统一为「存档」按钮，打开与 Web 端一致的 `app-admin.html`。
+  冲突提示条新增「打开存档面板」按钮，不再只给文字。
+- **断言**：`app-ui.js` 静态断言（全员挂载、无独立上传、冲突入口）。
+
+#### 分区参数一致性（P1）
+- **改法**：`CloudSaveSnapshot` 记录服务端实际分区；历史/回滚沿用该值，
+  不再用请求版本（否则显示 legacy 数据、历史却查 by-version 空目录）。
+- **断言**：`check_game_host_contract.dart` +4 条（legacy/版本号解析、参数、去管理员门禁）。
+
+#### 21:9 短屏（P2）
+- 面板在 `max-height:430px` 时贴满、压缩标题栏；游戏画面比例仍由
+  「画面比例」设置（均衡/完整/拉伸）控制。
+
+### 验证（实测）
+- `flutter analyze`：No issues found
+- 客户端 5 套：43 + 63 + 11 + 43 + 27 = **187 通过 / 0 失败**
+- 服务端 4 套：78 + 19 + 35 + 41 = **173 通过 / 0 失败**
+- `/load?gameVersion=0.16.1`（akadmin）：`kind=migrated`，返回 4 个键
+- `/list` 非管理员：只返回本人 4 份 legacy 存档
+- Windows 启动：`exited=False`，无 `MissingPluginException`
+- 更新通道：APK/Windows 清单 200，latest=90020，size/sha 与磁盘一致
+
+### 产物
+- APK 58,634,593 B `ef56cc34070b681e8e2fa9312fbdb72b9deb8d93faeecffa0bdc01f3b2d967b3`
+- Windows zip 190,010,037 B `bc3064ab0b093d1f05698d8be560a37f73033d3b71111ee6bc5ec1bea383669b`
+
+### 遗留
+- 21:9 游戏画面若仍被裁切，需确认「画面比例」设置（默认均衡 = 17:9 视口）。
+- 真机复测：进游戏确认右下角为「存档」，面板能列出版本/历史并回滚。

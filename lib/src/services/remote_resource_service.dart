@@ -412,9 +412,15 @@ class RemoteResourceService {
     required String key,
     required int ts,
     String name = '',
+    String gameVersion = '',
     Duration timeout = saveServerRequestTimeout,
   }) async {
-    final body = <String, Object?>{'user': user, 'key': key, 'ts': ts};
+    final body = <String, Object?>{
+      'user': user,
+      'key': key,
+      'ts': ts,
+      if (gameVersion.trim().isNotEmpty) 'gameVersion': gameVersion.trim(),
+    };
     if (name.isNotEmpty) {
       // 精确到具体历史文件：同一秒内可能有多个版本
       body['name'] = name;

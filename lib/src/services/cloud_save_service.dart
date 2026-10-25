@@ -57,6 +57,7 @@ class CloudSaveSnapshot {
     required this.entries,
     required this.serverTime,
     this.isAdmin = false,
+    this.gameVersion = '',
   });
 
   factory CloudSaveSnapshot.fromJson(Map<String, Object?> json) {
@@ -95,6 +96,7 @@ class CloudSaveSnapshot {
       entries: entries,
       serverTime: _asInt(json['server_ts']) ?? 0,
       isAdmin: json['is_admin'] == true,
+      gameVersion: (json['gameVersion'] as String? ?? '').trim(),
     );
   }
 
@@ -102,9 +104,14 @@ class CloudSaveSnapshot {
   final List<CloudSaveEntry> entries;
   final int serverTime;
 
-  /// 令牌是否属于 authentik Admins 组。历史版本与回滚是管理员接口，
-  /// 非管理员看到按钮只会拿到 403，所以页面要据此隐藏。
+  /// 令牌是否属于 authentik Admins 组。跨用户管理才需要管理员；
+  /// 自己的历史版本与回滚对所有登录用户开放。
   final bool isAdmin;
+
+  /// 服务端实际返回的存档分区（空串 = 未分区的 legacy 存档）。
+  /// 历史/回滚必须用这个值，不能再用「请求的版本」：否则页面显示的是
+  /// 继承来的 legacy 存档，历史却去查一个不存在的 by-version 目录。
+  final String gameVersion;
 
   int get totalBytes => entries.fold(0, (sum, entry) => sum + entry.bytes);
 

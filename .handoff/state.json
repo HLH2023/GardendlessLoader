@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
   "project": "GardendlessLoader",
-  "updatedAt": "2026-10-25T15:14:34+08:00",
+  "updatedAt": "2026-10-25T15:42:13+08:00",
   "updatedBy": "orchestrator/opencode",
   "release": {
-    "versionName": "0.9.0-hlh.19",
-    "versionCode": 90019,
-    "apkSha256": "30a6ac27a29656c7bdf2810572c3fc8fcd87b3a0b45dc6f6fc2c65f950de0b6e",
-    "apkBytes": 58634580,
-    "windowsSha256": "ec606fdf58767e8aecff18e19f9da27a82d40f2e76036ed593004029356e33fb",
-    "windowsBytes": 190010310,
-    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.19",
+    "versionName": "0.9.0-hlh.20",
+    "versionCode": 90020,
+    "apkSha256": "ef56cc34070b681e8e2fa9312fbdb72b9deb8d93faeecffa0bdc01f3b2d967b3",
+    "apkBytes": 58634593,
+    "windowsSha256": "bc3064ab0b093d1f05698d8be560a37f73033d3b71111ee6bc5ec1bea383669b",
+    "windowsBytes": 190010037,
+    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.20",
     "pendingPublish": false
   },
   "branches": {
@@ -36,14 +36,14 @@
     }
   },
   "tests": {
-    "server": 165,
-    "client": 183,
-    "total": 348,
+    "server": 173,
+    "client": 187,
+    "total": 360,
     "suites": [
       {
         "name": "server/cloud-saves",
         "cmd": "bash tools/test-cloud-saves.sh",
-        "count": 70
+        "count": 78
       },
       {
         "name": "server/concurrency",
@@ -78,7 +78,7 @@
       {
         "name": "client/game-host-contract",
         "cmd": "dart run tool/check_game_host_contract.dart",
-        "count": 39
+        "count": 43
       },
       {
         "name": "client/update-manifest",
@@ -691,6 +691,142 @@
         "无（本轮已完成服务端部署、双端发布与 Release）"
       ],
       "verifyOutput": "== 文件齐备 ==\n  ok   存在 .handoff/PROTOCOL.md\n  ok   存在 .handoff/HANDOFF.md\n  ok   存在 .handoff/state.json\n  ok   存在 .handoff/docs/01-architecture.md\n  ok   存在 .handoff/docs/02-branches.md\n  ok   存在 .handoff/docs/03-versioning.md\n  ok   存在 .handoff/docs/04-build.md\n  ok   存在 .handoff/docs/05-deployment.md\n  ok   存在 .handoff/docs/06-testing.md\n  ok   存在 .handoff/docs/07-backlog.md\n  ok   存在 .handoff/docs/08-handoff-log.md\n  ok   存在 .handoff/prompts/01-start.md\n  ok   存在 .handoff/prompts/02-return.md\n  ok   存在 .handoff/skills/gardendless-dev/SKILL.md\n\n== state.json 结构 ==\n  ok   OK review suites= 9 total= 348\n\n== 回执完整性 ==\n  ok   OK 5 条回执字段完整\n\n== 敏感信息扫描（.handoff + AGENTS.md + tools/handoff.sh） ==\n  ok   未发现服务器地址/令牌字面量\n\n== 源码敏感扫描（lib/tool/android/.github/pubspec/docs） ==\n  ok   源码与配置未出现服务器地址/令牌\n\n== AGENTS.md 只放持久信息 ==\n  ok   未出现版本号/任务号/测试数字/哈希等易变事实\n\n== Windows 构建脚本编码 ==\n  ok   build-windows.ps1 为 UTF-8 BOM + CRLF（bom-ok crlf=70 lf_only=0）\n\n== 短提示词长度 ==\n  ok   01-start.md 共 9 行（≤14）\n\n== 技能安装 ==\n  ok   已装入 opencode 全局 skills\n\n结果：22 通过 / 0 失败 / 0 警告"
+    },
+    {
+      "taskId": "R-20261025-01",
+      "by": "orchestrator/opencode",
+      "at": "2026-10-25T15:42:13+08:00",
+      "status": "review",
+      "readBack": {
+        "taskTitle": "hlh.20：存档页 legacy 继承 + 自助面板 + 游戏内存档按钮",
+        "versionBefore": "0.9.0-hlh.19 (90019)",
+        "testsBaseline": "348 项",
+        "versionAfter": "0.9.0-hlh.20 (90020)",
+        "testsAfter": "360 项（173 服务端 + 187 客户端）"
+      },
+      "changed": [
+        "save-api/server.py：pick_load_version 把 legacy 作为最旧可继承来源；/list 非管理员只返回本人并新增 saves[]（legacy+各版本）；/history /version /raw 允许本人",
+        "save-api/admin.html：移除管理员门槛；按 gameVersion 展示/历史/回滚/下载/删除；版本标签",
+        "save-api/ui.js：FAB 全员挂载；移除独立上传按钮；冲突提示新增「打开存档面板」；21:9 短屏面板贴满",
+        "lib/src/services/cloud_save_service.dart：快照记录服务端实际分区 gameVersion",
+        "lib/src/app_controller.dart：历史/回滚使用快照分区；restore 传 gameVersion",
+        "lib/src/services/remote_resource_service.dart：restoreSaveVersion 增加 gameVersion",
+        "lib/src/ui/pages/saves_page.dart：普通用户可展开历史/回滚（服务端按本人鉴权）",
+        "lib/src/l10n/app_strings.dart：明确「启动器只读、游戏运行时才自动上传」与游戏内「存档」入口",
+        "tool/check_game_host_contract.dart：+4 条（legacy/版本分区解析、历史参数、去管理员门禁）",
+        "tools/test-cloud-saves.sh：+8 条（legacy 6、自助 3、静态 UI 5；含 77→78 的冲突入口）",
+        ".handoff/docs/06|07|08、HANDOFF.md、docs/acceptance-android.md、state.json",
+        "docs/releases/v0.9.0-hlh.20.md（新）",
+        "pubspec.yaml：0.9.0-hlh.20+90020"
+      ],
+      "commands": [
+        "flutter analyze -> No issues found! (ran in 6.0s)",
+        "dart run tool/check_local_server.dart -> 43 通过 / 0 失败",
+        "dart run tool/check_storage_migration.dart -> 63 通过 / 0 失败",
+        "dart run tool/check_desktop_zip.dart /tmp/opencode/fixtures/pack.zip -> 11 通过 / 0 失败",
+        "dart run tool/check_game_host_contract.dart -> 43 通过 / 0 失败",
+        "dart run tool/check_update_manifest.dart -> 27 通过 / 0 失败",
+        "cd /home/hlh/pvzge && bash tools/test-cloud-saves.sh -> 78 通过 / 0 失败",
+        "cd /home/hlh/pvzge && python3 tools/test-concurrency.py -> 19 通过 / 0 失败",
+        "cd /home/hlh/pvzge && bash tools/test-save-versions.sh -> 41 通过 / 0 失败（含 legacy 继承 6 条）",
+        "cd /home/hlh/pvzge && node tools/test-sync-offline.js -> 41 通过 / 0 失败",
+        "curl /load?gameVersion=0.16.1（akadmin）-> kind=migrated，4 个键",
+        "curl /list（非管理员）-> 只返回本人 4 份 legacy 存档",
+        "bash tools/build-apk.sh --release -> 58,634,593 B；versionCode 90020；v1+v2+v3",
+        "ssh win build-windows.ps1 -> 190,010,037 B；exe 版本资源含 0.9.0-hlh.20；启动无 MissingPluginException",
+        "publish-apk.sh / publish-windows.sh -> latest=90020，size/sha 与磁盘一致",
+        "GitHub Release v0.9.0-hlh.20 创建（201），两个资产 uploaded"
+      ],
+      "tests": {
+        "analyze": "No issues found",
+        "suites": [
+          {
+            "name": "server/cloud-saves",
+            "passed": 78,
+            "failed": 0,
+            "total": 78
+          },
+          {
+            "name": "server/concurrency",
+            "passed": 19,
+            "failed": 0,
+            "total": 19
+          },
+          {
+            "name": "server/save-versions",
+            "passed": 41,
+            "failed": 0,
+            "total": 41
+          },
+          {
+            "name": "server/sync-offline",
+            "passed": 41,
+            "failed": 0,
+            "total": 41
+          },
+          {
+            "name": "client/local-server",
+            "passed": 43,
+            "failed": 0,
+            "total": 43
+          },
+          {
+            "name": "client/storage-migration",
+            "passed": 63,
+            "failed": 0,
+            "total": 63
+          },
+          {
+            "name": "client/desktop-zip",
+            "passed": 11,
+            "failed": 0,
+            "total": 11
+          },
+          {
+            "name": "client/game-host-contract",
+            "passed": 43,
+            "failed": 0,
+            "total": 43
+          },
+          {
+            "name": "client/update-manifest",
+            "passed": 27,
+            "failed": 0,
+            "total": 27
+          }
+        ],
+        "total": 360,
+        "passed": 360,
+        "failed": 0,
+        "skipped": 0
+      },
+      "artifacts": [
+        {
+          "path": "dist/gardendless-loader-0.9.0-hlh.20.apk",
+          "bytes": 58634593,
+          "sha256": "ef56cc34070b681e8e2fa9312fbdb72b9deb8d93faeecffa0bdc01f3b2d967b3"
+        },
+        {
+          "path": "dist/gardendless-loader-0.9.0-hlh.20-90020-windows-x64.zip",
+          "bytes": 190010037,
+          "sha256": "bc3064ab0b093d1f05698d8be560a37f73033d3b71111ee6bc5ec1bea383669b"
+        },
+        {
+          "path": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.20",
+          "bytes": 0,
+          "sha256": "",
+          "note": "两个资产 state=uploaded"
+        }
+      ],
+      "remaining": [
+        "安卓真机复测：进游戏确认右下角是「存档」；面板能列出版本/历史并回滚；下载新资源包后存档页不再 0 条。",
+        "21:9 游戏画面是否仍需调整取决于「画面比例」设置（均衡=17:9、完整=全部、拉伸=铺满）。",
+        "服务端管理页与游戏内面板的版本维度 UI 尚未在真机点过，仅通过 HTTP/静态断言验证。"
+      ],
+      "needsHermes": [
+        "无（服务端已部署，双端已发布）"
+      ],
+      "verifyOutput": "== 文件齐备 ==\n  ok   存在 .handoff/PROTOCOL.md\n  ok   存在 .handoff/HANDOFF.md\n  ok   存在 .handoff/state.json\n  ok   存在 .handoff/docs/01-architecture.md\n  ok   存在 .handoff/docs/02-branches.md\n  ok   存在 .handoff/docs/03-versioning.md\n  ok   存在 .handoff/docs/04-build.md\n  ok   存在 .handoff/docs/05-deployment.md\n  ok   存在 .handoff/docs/06-testing.md\n  ok   存在 .handoff/docs/07-backlog.md\n  ok   存在 .handoff/docs/08-handoff-log.md\n  ok   存在 .handoff/prompts/01-start.md\n  ok   存在 .handoff/prompts/02-return.md\n  ok   存在 .handoff/skills/gardendless-dev/SKILL.md\n\n== state.json 结构 ==\n  ok   OK review suites= 9 total= 360\n\n== 回执完整性 ==\n  ok   OK 6 条回执字段完整\n\n== 敏感信息扫描（.handoff + AGENTS.md + tools/handoff.sh） ==\n  ok   未发现服务器地址/令牌字面量\n\n== 源码敏感扫描（lib/tool/android/.github/pubspec/docs） ==\n  ok   源码与配置未出现服务器地址/令牌\n\n== AGENTS.md 只放持久信息 ==\n  ok   未出现版本号/任务号/测试数字/哈希等易变事实\n\n== Windows 构建脚本编码 ==\n  ok   build-windows.ps1 为 UTF-8 BOM + CRLF（bom-ok crlf=70 lf_only=0）\n\n== 短提示词长度 ==\n  ok   01-start.md 共 9 行（≤14）\n\n== 技能安装 ==\n  ok   已装入 opencode 全局 skills\n\n结果：22 通过 / 0 失败 / 0 警告"
     }
   ],
   "handoffLog": [
@@ -742,6 +878,13 @@
       "event": "hotfix-release",
       "task": "R-20261025-01",
       "note": "hlh.19：修复 Windows 日志通道缺失导致的无法启动；会话令牌失败关闭；迁移父目录保护；更新脚本引号/回滚；348 项全绿；已发布"
+    },
+    {
+      "at": "2026-10-25T15:42:13+08:00",
+      "by": "orchestrator/opencode",
+      "event": "save-fix-release",
+      "task": "R-20261025-01",
+      "note": "hlh.20：legacy 继承、自助存档面板、游戏内「存档」按钮全员开放、移除独立上传；360 项全绿并发布"
     }
   ]
 }
