@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -32,7 +33,10 @@ class SettingsPage extends StatelessWidget {
       left: [
         _LoaderPanel(controller: controller, actions: actions),
         const SizedBox(height: 16),
-        _AppUpdatePanel(controller: controller),
+        if (Platform.isWindows)
+          _WindowsUpdatePanel(controller: controller)
+        else
+          _AppUpdatePanel(controller: controller),
         const SizedBox(height: 16),
         _LaunchPreferences(controller: controller),
         const SizedBox(height: 16),
@@ -439,6 +443,212 @@ class _AppUpdatePanel extends StatelessWidget {
                   compact: true,
                   onPressed: () =>
                       controller.openAppInstallPermissionSettings(),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 桌面端更新：只做「检查 / 下载 / 校验 / 打开目录」。
+///
+/// 不自动替换安装目录：替换运行中的 CEF 应用需要外部进程，复制失败会留下
+/// 半套文件。手动替换是刻意保留的边界，见 07-backlog B-08。
+class _WindowsUpdatePanel extends StatelessWidget {
+  const _WindowsUpdatePanel({required this.controller});
+
+  final AppController controller;
+
+  Future<void> _confirmApply(
+    BuildContext context,
+    AppController controller,
+  ) async {
+    final strings = context.strings;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(strings.windowsUpdateApplyTitle),
+        content: Text(strings.windowsUpdateApplyMessage),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        actions: [
+          GardenButton(
+            label: strings.cancel,
+            compact: true,
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+          ),
+          GardenButton(
+            label: strings.windowsUpdateApply,
+            compact: true,
+            tone: GardenButtonTone.danger,
+            icon: Icons.restart_alt_rounded,
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await controller.applyWindowsUpdate();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.garden;
+    final strings = context.strings;
+    final status = controller.windowsUpdate;
+    final release = status.release;
+    final notes = release?.notes ?? '';
+    final (String stateText, Color? stateColor) = switch (status.phase) {
+      AppUpdatePhase.idle => (strings.appUpdateNotChecked, null),
+      AppUpdatePhase.checking => (strings.windowsUpdateChecking, null),
+      AppUpdatePhase.upToDate => (strings.windowsUpdateUpToDate, null),
+      AppUpdatePhase.available => (strings.updateAvailable, palette.accent),
+      AppUpdatePhase.downloading => (strings.windowsUpdateDownloading, null),
+      AppUpdatePhase.verifying => (strings.windowsUpdateVerifying, null),
+      AppUpdatePhase.ready => (strings.windowsUpdateReadyShort, palette.accent),
+      AppUpdatePhase.installing => (strings.appUpdateInstalling, null),
+      AppUpdatePhase.failed => (strings.appUpdateFailed, palette.danger),
+    };
+    final hintStyle = TextStyle(
+      color: palette.inkMuted,
+      fontSize: 12.5,
+      height: 1.5,
+    );
+    final canDownload = !status.active &&
+        release != null &&
+        (status.phase == AppUpdatePhase.available ||
+            status.phase == AppUpdatePhase.failed);
+    final canOpen = controller.windowsUpdateFile != null;
+
+    return SurfaceCard(
+      key: const ValueKey('windows-update'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PanelHeader(
+            title: strings.windowsUpdateTitle,
+            icon: Icons.desktop_windows_rounded,
+            trailing: StatusLabel(label: stateText, color: stateColor),
+          ),
+          const SizedBox(height: 8),
+          Text(strings.windowsUpdateSubtitle, style: hintStyle),
+          const SizedBox(height: 14),
+          MetricRow(
+            metrics: [
+              Metric(
+                label: strings.currentVersion,
+                value: 'v${controller.installedVersionName}',
+              ),
+              Metric(
+                label: strings.buildNumber,
+                value: controller.installedBuildNumber.isEmpty
+                    ? '--'
+                    : controller.installedBuildNumber,
+              ),
+            ],
+          ),
+          if (release != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              strings.windowsUpdateAvailable(
+                release.version,
+                '${release.versionCode}',
+              ),
+              style: hintStyle.copyWith(
+                color: palette.ink,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          if (notes.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              notes,
+              maxLines: 8,
+              overflow: TextOverflow.ellipsis,
+              style: hintStyle,
+            ),
+          ],
+          if (status.phase == AppUpdatePhase.downloading ||
+              status.phase == AppUpdatePhase.verifying) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: status.totalBytes > 0
+                    ? status.receivedBytes / status.totalBytes
+                    : null,
+                minHeight: 6,
+                backgroundColor: palette.surfaceMuted,
+                color: palette.accent,
+              ),
+            ),
+          ],
+          if (status.phase == AppUpdatePhase.ready) ...[
+            const SizedBox(height: 8),
+            Text(
+              strings.windowsUpdateReady,
+              style: hintStyle.copyWith(color: palette.accent),
+            ),
+          ],
+          if (status.phase == AppUpdatePhase.failed) ...[
+            const SizedBox(height: 8),
+            Text(
+              strings.windowsUpdateError(status.errorCode, status.message),
+              style: hintStyle.copyWith(color: palette.danger, fontSize: 12.5),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              GardenButton(
+                key: const ValueKey('windows-update-check'),
+                label: strings.windowsUpdateCheck,
+                icon: Icons.refresh_rounded,
+                tone: GardenButtonTone.ghost,
+                compact: true,
+                busy: status.phase == AppUpdatePhase.checking,
+                onPressed:
+                    status.active ? null : () => controller.checkWindowsUpdate(),
+              ),
+              if (status.phase == AppUpdatePhase.downloading)
+                GardenButton(
+                  key: const ValueKey('windows-update-cancel'),
+                  label: strings.cancelDownload,
+                  icon: Icons.close_rounded,
+                  tone: GardenButtonTone.danger,
+                  compact: true,
+                  onPressed: controller.cancelWindowsUpdateDownload,
+                )
+              else if (canDownload)
+                GardenButton(
+                  key: const ValueKey('windows-update-download'),
+                  label: strings.windowsUpdateDownload,
+                  icon: Icons.download_rounded,
+                  tone: GardenButtonTone.primary,
+                  compact: true,
+                  onPressed: () => controller.downloadWindowsUpdate(),
+                ),
+              if (canOpen)
+                GardenButton(
+                  key: const ValueKey('windows-update-apply'),
+                  label: strings.windowsUpdateApply,
+                  icon: Icons.restart_alt_rounded,
+                  tone: GardenButtonTone.primary,
+                  compact: true,
+                  onPressed: () => _confirmApply(context, controller),
+                ),
+              if (canOpen)
+                GardenButton(
+                  key: const ValueKey('windows-update-folder'),
+                  label: strings.windowsUpdateOpenFolder,
+                  icon: Icons.folder_open_rounded,
+                  compact: true,
+                  onPressed: () => controller.openWindowsUpdateFolder(),
                 ),
             ],
           ),

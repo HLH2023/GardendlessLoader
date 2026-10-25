@@ -1,19 +1,20 @@
 # 06 测试
 
-## 1. 基线：286 项（服务端 145 + 客户端 141）
+## 1. 基线：334 项（服务端 162 + 客户端 172）
 
 ```bash
-# 服务端（145 项）—— 在 /home/hlh/pvzge 下跑
-bash  tools/test-cloud-saves.sh      # 58  云端存档全链路（含吊销、鉴权边界、连接复用）
+# 服务端（162 项）—— 在 /home/hlh/pvzge 下跑
+bash  tools/test-cloud-saves.sh      # 67  云端存档全链路（含吊销、鉴权边界、连接复用、会话令牌）
 python3 tools/test-concurrency.py    # 19  并发写/锁/乐观版本号
-bash  tools/test-save-versions.sh    # 27  版本隔离 + 向下兼容迁移 + 回滚
+bash  tools/test-save-versions.sh    # 35  版本隔离 + 向下兼容迁移 + 回滚 + 历史保留策略
 node  tools/test-sync-offline.js     # 41  客户端 sync.js 沙盒（冲突/退避/401/回滚）
 
-# 客户端（141 项）—— 在仓库根目录跑
+# 客户端（172 项）—— 在仓库根目录跑
 dart run tool/check_local_server.dart          # 43  本地服务器（注入/Range/穿越/软链/并发）
 dart run tool/check_storage_migration.dart     # 62  迁移 + 日志自愈 + 空间预检 + 事务门禁
 dart run tool/check_desktop_zip.dart <zip>     # 11  流式解压 + zip-slip
-dart run tool/check_game_host_contract.dart    # 25  原生退出原因契约 + tokenRejected 退登判定
+dart run tool/check_game_host_contract.dart    # 34  原生退出原因契约 + 会话令牌解析 + 凭据文件契约
+dart run tool/check_update_manifest.dart       # 22  Windows 更新清单 + 版本判定 + 更新脚本编码
 ```
 
 `<zip>` fixture 不是任意包：`check_desktop_zip.dart` 对内容有明确预期
@@ -44,7 +45,7 @@ dart run tool/stress_real_pack.dart /var/www/pvzge-res/pvzge-res-<ver>.zip /tmp/
 
 ## 3. 新增测试的规矩
 
-1. **不新建框架**：服务端断言加进现有 4 个脚本，客户端加进现有 4 个 `tool/check_*.dart`。
+1. **不新建框架**：服务端断言加进现有 4 个脚本，客户端加进现有 5 个 `tool/check_*.dart`。
 2. 每条断言必须有一个明确的名字（推进「什么场景下应该怎样」），失败要能看出差在哪。
 3. 断言里不要写死环境相关数字（端口、绝对路径），用变量或临时目录。
 4. 涉及安全的用例（越权、伪造头、zip-slip）必须同时有**正例**（合法请求成功）和**反例**。

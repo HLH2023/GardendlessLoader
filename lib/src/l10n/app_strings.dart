@@ -114,6 +114,13 @@ class AppStrings {
   String get storageMigrating => _t('正在迁移资源…', 'Migrating resources…');
   String get storagePickFolder => _t('选择目录…', 'Choose folder…');
   String get storageDialogTitle => _t('选择资源存储位置', 'Choose resource storage');
+  String get storageAndroidCandidatesHint => _t(
+        '系统文件选择器返回的是 content:// 授权，游戏 WebView 读不了。'
+            '下面列出各存储卷上真实可写的位置；U 盘等特殊目录可在输入框手填绝对路径。',
+        'The system picker returns content:// grants the game WebView cannot '
+            'read. The entries below are real, writable locations on each '
+            'volume; type an absolute path for unusual devices.',
+      );
   String get storageDialogBody => _t(
         '会把这个目录里的资源包原样搬到新位置，完成后自动生效。迁移失败会自动回滚，原位置仍然可用。',
         'The resource package is moved to the new location and applied right away. A failed '
@@ -441,6 +448,50 @@ class AppStrings {
   /// A readable sentence for an app-update failure [code]; [detail] is the
   /// host's own wording (numbers, a package name) and only appears where the
   /// sentence has room for it.
+  // Settings page: Windows desktop update (download + verify, manual replace).
+  String get windowsUpdateTitle => _t('桌面端更新', 'Desktop update');
+  String get windowsUpdateSubtitle => _t(
+        '检查服务端发布的 Windows 构建，下载后按清单校验 SHA-256。'
+            '替换仍由你完成：退出应用 → 解压覆盖安装目录 → 重新启动。',
+        'Check the Windows build published on the save server, download it and '
+            'verify its SHA-256. Replacing the install stays manual: quit the '
+            'app, extract the zip over the install folder, then start it again.',
+      );
+  String get windowsUpdateCheck => _t('检查更新', 'Check for updates');
+  String get windowsUpdateDownload => _t('下载更新', 'Download update');
+  String get windowsUpdateOpenFolder => _t('打开下载目录', 'Open download folder');
+  String get windowsUpdateApply =>
+      _t('退出并自动更新', 'Quit and update automatically');
+  String get windowsUpdateApplyTitle => _t('覆盖安装目录？', 'Replace the install folder?');
+  String get windowsUpdateApplyMessage => _t(
+        '应用会退出，由外部脚本备份并覆盖当前安装目录，然后重新启动。'
+            '复制失败会自动回滚到旧版本；更新日志在系统临时目录。',
+        'The app will quit; an external script backs up and replaces the install '
+            'folder, then starts it again. A failed copy rolls back to the old '
+            'version; the log stays in the system temp folder.',
+      );
+  String get windowsUpdateChecking => _t('正在检查…', 'Checking…');
+  String get windowsUpdateDownloading => _t('正在下载', 'Downloading');
+  String get windowsUpdateVerifying => _t('正在校验…', 'Verifying…');
+  String get windowsUpdateReadyShort => _t('可更新', 'Ready');
+  String get windowsUpdateReady => _t(
+        '已下载并通过 SHA-256 校验。退出应用后解压覆盖安装目录即可。',
+        'Downloaded and SHA-256 verified. Quit the app, then extract it over '
+            'the install folder.',
+      );
+  String get windowsUpdateUpToDate =>
+      _t('已是最新构建', 'Already the latest build');
+  String get windowsUpdateNotSignedIn => _t(
+        '请先登录云存档服务器，再检查桌面端更新。',
+        'Sign in to the save server before checking for desktop updates.',
+      );
+  String windowsUpdateAvailable(String version, String build) => _t(
+        '新构建 $version（$build）',
+        'New build $version ($build)',
+      );
+  String windowsUpdateError(String? code, String? detail) =>
+      _t('更新失败（$code）：$detail', 'Update failed ($code): $detail');
+
   String appUpdateError(String? code, String? detail) {
     final extra = detail == null || detail.trim().isEmpty ? '' : detail;
     return switch (code) {

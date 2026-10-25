@@ -119,7 +119,10 @@ class OnlineSessionHeartbeat(
             onTokenRejected: () -> Unit,
         ): OnlineSessionHeartbeat? {
             val bridge = File(session.appRoot, GameActivity.SAVE_BRIDGE_FILE_NAME)
-            val credentials = OnlineGameResourceClient.readBridgeCredentials(bridge) ?: return null
+            val credentials = OnlineGameResourceClient.readHostCredentials(
+                session.appRoot,
+                bridge,
+            ) ?: return null
             return OnlineSessionHeartbeat(
                 base = session.origin,
                 token = credentials.second,

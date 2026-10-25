@@ -36,6 +36,8 @@ import 'services/resource_validator.dart';
 import 'services/resource_picker_service.dart';
 import 'services/shortcut_service.dart';
 import 'services/update_check_service.dart';
+import 'services/windows_update_service.dart';
+import 'services/windows_updater.dart';
 
 //AppController 是整个应用的核心控制器，负责管理应用的状态、处理业务逻辑，并与 UI 进行交互。它使用 ChangeNotifier 来通知 UI 更新。
 class AppController extends ChangeNotifier {
@@ -70,6 +72,14 @@ class AppController extends ChangeNotifier {
   final CloudLoginService _cloudLoginService = const CloudLoginService();
   late final ImportService _importService;
   RemoteDownloadStatus _remoteDownload = RemoteDownloadStatus.idle;
+  late final WindowsUpdateService _windowsUpdateService = WindowsUpdateService(
+    _remoteResourceService,
+  );
+  WindowsUpdateStatus _windowsUpdate = const WindowsUpdateStatus(
+    phase: AppUpdatePhase.idle,
+  );
+  File? _windowsUpdateFile;
+  RemoteDownloadCancellation? _windowsUpdateCancellation;
   AppUpdateStatus _appUpdate = AppUpdateStatus.idle;
   AppUpdateManifest? _appUpdateManifest;
   File? _appUpdateFile;
@@ -441,6 +451,12 @@ class AppController extends ChangeNotifier {
   /// A verified installer is on disk and can be handed to the system again,
   /// e.g. after the user granted the unknown-sources permission.
   bool get appUpdateInstallReady => _appUpdateFile != null;
+
+  /// Windows 端的更新（清单 + zip 下载 + 校验）。与 APK 更新完全独立，
+  /// 避免一个平台的失败状态污染另一个平台。
+  WindowsUpdateStatus get windowsUpdate => _windowsUpdate;
+  File? get windowsUpdateFile => _windowsUpdateFile;
+  bool get windowsUpdateSupported => Platform.isWindows;
   ({String? code, String message})? get remoteManifestFailure =>
       _remoteManifestFailure;
   bool get remoteManifestLoading => _remoteManifestLoading;
@@ -557,6 +573,7 @@ class AppController extends ChangeNotifier {
     final root = _paths?.root;
     if (root != null) {
       await _deleteFileQuietly(File(p.join(root.path, syncBridgeFileName)));
+      await _deleteFileQuietly(File(p.join(root.path, nativeTokenFileName)));
     }
     _appLogger.emit(
       level: LogLevel.info,
@@ -2951,6 +2968,386 @@ class AppController extends ChangeNotifier {
     _remoteResourceService.abortActiveRequests();
   }
 
+  // ===== Windows 更新（清单 + zip 下载 + 校验）=====
+
+  /// 检查服务端是否发布了更新的 Windows 构建。
+  Future<void> checkWindowsUpdate() async {
+    if (!Platform.isWindows || _windowsUpdate.active) return;
+    final strings = AppStrings.current;
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) {
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        errorCode:
+            base.isEmpty ? 'save_server_invalid' : 'windows_update_not_signed_in',
+        message: strings.saveServerNotConfigured,
+      );
+      notifyListeners();
+      return;
+    }
+    _windowsUpdate = WindowsUpdateStatus(
+      phase: AppUpdatePhase.checking,
+      release: _windowsUpdate.release,
+    );
+    notifyListeners();
+    final stopwatch = Stopwatch()..start();
+    try {
+      await _loadCurrentAppVersion();
+      final installed = InstalledAppBuild(
+        versionName: _installedVersionName,
+        buildNumber: _installedBuildNumber,
+      );
+      final manifest = await _windowsUpdateService.fetchManifest(
+        token: token,
+        baseUrl: base,
+      );
+      final release = manifest.latest;
+      if (release == null) {
+        throw const RemoteResourceFailure(
+          'windows_update_manifest_empty',
+          'Windows manifest has no latest release',
+        );
+      }
+      final upgrade = isWindowsUpgrade(
+        release: release,
+        installedVersionCode: parseVersionCode(installed.buildNumber),
+        installedVersionName: installed.versionName,
+      );
+      _windowsUpdateFile = null;
+      if (!upgrade) {
+        _windowsUpdate = WindowsUpdateStatus(
+          phase: AppUpdatePhase.upToDate,
+          release: release,
+          totalBytes: release.size,
+        );
+      } else {
+        final target = _windowsUpdateService.targetFile(
+          _requirePaths().downloadsDir,
+          release,
+        );
+        final complete = release.size > 0 &&
+            await target.exists() &&
+            await target.length() == release.size &&
+            await _windowsUpdateService.verifyFile(target, release);
+        if (complete) _windowsUpdateFile = target;
+        _windowsUpdate = WindowsUpdateStatus(
+          phase: complete ? AppUpdatePhase.ready : AppUpdatePhase.available,
+          release: release,
+          totalBytes: release.size,
+        );
+      }
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'app.update',
+        event: 'windows_update_checked',
+        outcome: LogOutcome.succeeded,
+        durationMs: stopwatch.elapsedMilliseconds,
+        context: <String, Object?>{
+          'installedVersion': installed.versionName,
+          'latestVersion': release.version,
+          'latestCode': release.versionCode,
+          'updateAvailable': upgrade,
+        },
+      );
+    } on RemoteResourceFailure catch (failure) {
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: _windowsUpdate.release,
+        errorCode: failure.code,
+        message: failure.message,
+      );
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'app.update',
+        event: 'windows_update_checked',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        message: failure.message,
+      );
+    } catch (error, stackTrace) {
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: _windowsUpdate.release,
+        errorCode: 'windows_update_check_failed',
+        message: '$error',
+      );
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'app.update',
+        event: 'windows_update_checked',
+        outcome: LogOutcome.failed,
+        code: 'windows_update_check_failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  /// 下载并校验 Windows zip。校验通过后才允许打开所在文件夹。
+  Future<void> downloadWindowsUpdate() async {
+    if (!Platform.isWindows) return;
+    final release = _windowsUpdate.release;
+    if (release == null || _windowsUpdate.active) return;
+    if (_windowsUpdate.phase == AppUpdatePhase.upToDate) return;
+    final strings = AppStrings.current;
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) {
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: release,
+        errorCode: 'windows_update_not_signed_in',
+        message: strings.saveServerNotConfigured,
+      );
+      notifyListeners();
+      return;
+    }
+    final Directory downloadsDir;
+    final File target;
+    try {
+      downloadsDir = _requirePaths().downloadsDir;
+      await downloadsDir.create(recursive: true);
+      target = _windowsUpdateService.targetFile(downloadsDir, release);
+    } catch (error, stackTrace) {
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: release,
+        errorCode: 'windows_update_download_failed',
+        message: '$error',
+      );
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'app.update',
+        event: 'windows_update_download_finished',
+        outcome: LogOutcome.failed,
+        code: 'windows_update_download_failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      notifyListeners();
+      return;
+    }
+    final cancellation = RemoteDownloadCancellation();
+    _windowsUpdateCancellation = cancellation;
+    _windowsUpdate = WindowsUpdateStatus(
+      phase: AppUpdatePhase.downloading,
+      release: release,
+      totalBytes: release.size,
+    );
+    notifyListeners();
+    final stopwatch = Stopwatch()..start();
+    var lastNotify = DateTime.fromMillisecondsSinceEpoch(0);
+    try {
+      final file = await _windowsUpdateService.download(
+        release: release,
+        token: token,
+        baseUrl: base,
+        targetFile: target,
+        cancellation: cancellation,
+        onProgress: (progress) {
+          final now = DateTime.now();
+          if (now.difference(lastNotify) < const Duration(milliseconds: 200)) {
+            return;
+          }
+          lastNotify = now;
+          _windowsUpdate = WindowsUpdateStatus(
+            phase: AppUpdatePhase.downloading,
+            release: release,
+            receivedBytes: progress.receivedBytes,
+            totalBytes: progress.totalBytes,
+          );
+          notifyListeners();
+        },
+      );
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.verifying,
+        release: release,
+        receivedBytes: release.size,
+        totalBytes: release.size,
+      );
+      notifyListeners();
+      if (!await _windowsUpdateService.verifyFile(file, release)) {
+        throw const RemoteResourceFailure(
+          'windows_update_checksum_mismatch',
+          '下载的文件与清单 sha256 不一致',
+        );
+      }
+      _windowsUpdateFile = file;
+      await _windowsUpdateService.removeStaleZips(file);
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.ready,
+        release: release,
+        receivedBytes: release.size,
+        totalBytes: release.size,
+      );
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'app.update',
+        event: 'windows_update_download_finished',
+        outcome: LogOutcome.succeeded,
+        durationMs: stopwatch.elapsedMilliseconds,
+        context: <String, Object?>{
+          'version': release.version,
+          'bytes': release.size,
+        },
+      );
+    } on RemoteResourceFailure catch (failure) {
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: release,
+        errorCode: failure.code,
+        message: failure.message,
+      );
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'app.update',
+        event: 'windows_update_download_finished',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        message: failure.message,
+      );
+    } catch (error, stackTrace) {
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: release,
+        errorCode: 'windows_update_download_failed',
+        message: '$error',
+      );
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'app.update',
+        event: 'windows_update_download_finished',
+        outcome: LogOutcome.failed,
+        code: 'windows_update_download_failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    } finally {
+      _windowsUpdateCancellation = null;
+      notifyListeners();
+    }
+  }
+
+  void cancelWindowsUpdateDownload() {
+    _windowsUpdateCancellation?.cancel();
+    _remoteResourceService.abortActiveRequests();
+  }
+
+  /// 退出应用并让外部脚本替换安装目录。
+  ///
+  /// 这是唯一会终止进程的更新路径：调用前已经校验过 zip 的 sha256，
+  /// 并且安装目录必须可写（Program Files 下需要管理员权限，直接拒绝）。
+  Future<void> applyWindowsUpdate() async {
+    if (!Platform.isWindows) return;
+    final release = _windowsUpdate.release;
+    final file = _windowsUpdateFile;
+    if (release == null || file == null || _windowsUpdate.active) return;
+    final target = await windowsInstallTarget();
+    if (target == null) {
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: release,
+        errorCode: 'windows_update_not_writable',
+        message: '安装目录不可写，请用管理员权限运行或手动解压',
+      );
+      notifyListeners();
+      return;
+    }
+    // 启动脚本前再校验一次：下载完成后文件仍可能被改坏
+    if (!await _windowsUpdateService.verifyFile(file, release)) {
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: release,
+        errorCode: 'windows_update_checksum_mismatch',
+        message: '更新包校验失败，请重新下载',
+      );
+      notifyListeners();
+      return;
+    }
+    try {
+      final script = await WindowsUpdaterScript.write(
+        File(p.join(file.parent.path, 'apply-windows-update.ps1')),
+      );
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.installing,
+        release: release,
+      );
+      notifyListeners();
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'app.update',
+        event: 'windows_update_apply_started',
+        outcome: LogOutcome.started,
+        context: <String, Object?>{
+          'version': release.version,
+          'target': target.target.path,
+        },
+      );
+      await Process.start(
+        'powershell.exe',
+        <String>[
+          '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+          script.path,
+          '-WaitPid',
+          pid.toString(),
+          '-Zip',
+          file.path,
+          '-Target',
+          target.target.path,
+          '-Exe',
+          target.exe,
+        ],
+        mode: ProcessStartMode.detached,
+      );
+      exit(0);
+    } catch (error, stackTrace) {
+      _windowsUpdate = WindowsUpdateStatus(
+        phase: AppUpdatePhase.failed,
+        release: release,
+        errorCode: 'windows_update_apply_failed',
+        message: '$error',
+      );
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'app.update',
+        event: 'windows_update_apply_failed',
+        outcome: LogOutcome.failed,
+        code: 'windows_update_apply_failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      notifyListeners();
+    }
+  }
+
+  /// 打开已校验 zip 所在目录，方便用户退出后解压覆盖。
+  Future<void> openWindowsUpdateFolder() async {
+    final file = _windowsUpdateFile;
+    if (!Platform.isWindows || file == null) return;
+    try {
+      await Process.start(
+        'explorer.exe',
+        <String>[file.parent.path],
+        mode: ProcessStartMode.detached,
+      );
+    } catch (error, stackTrace) {
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'app.update',
+        event: 'windows_update_open_folder_failed',
+        outcome: LogOutcome.failed,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
   /// Re-checks everything the server promised before opening the installer:
   /// the manifest's package is this app, its versionCode is newer than the
   /// installed one, and the file still hashes to the published SHA-256.
@@ -3089,12 +3486,25 @@ class AppController extends ChangeNotifier {
   /// the launch: the game opens without cloud saves and the log records why.
   Future<void> _prepareSaveBridge(Directory appRoot) async {
     final file = File(p.join(appRoot.path, syncBridgeFileName));
+    final nativeFile = File(p.join(appRoot.path, nativeTokenFileName));
     final content = await buildSaveBridgeScript();
     if (content.isEmpty) {
       await _deleteFileQuietly(file);
+      await _deleteFileQuietly(nativeFile);
       return;
     }
     try {
+      // 原生心跳/在线代理要用长期设备令牌；页面脚本里只有短时会话令牌。
+      // 分开两个文件，避免「页面过期」把在线会话登记一起弄断。
+      await nativeFile.writeAsString(
+        jsonEncode(<String, Object?>{
+          'token': _appSettings.deviceToken.trim(),
+        }),
+        flush: true,
+      );
+      if (!Platform.isWindows) {
+        await Process.run('chmod', ['600', nativeFile.path]);
+      }
       await file.writeAsString(content, flush: true);
       // 桥文件里有 `token:"pvz_..."` 明文：资源根可能位于用户自选目录，
       // 落地即收紧到 0600（Windows 上 chmod 是空操作）。
@@ -3121,11 +3531,40 @@ class AppController extends ChangeNotifier {
   /// 未登录或未配置服务器时返回空字符串：游戏照常启动，只是没有云存档。
   Future<String> buildSaveBridgeScript() async {
     final base = _appSettings.effectiveServerBaseUrl;
-    final token = _appSettings.deviceToken.trim();
-    if (base.isEmpty || token.isEmpty) return '';
+    final deviceToken = _appSettings.deviceToken.trim();
+    if (base.isEmpty || deviceToken.isEmpty) return '';
     try {
+      // 页面只拿短时会话令牌：设备令牌留在启动器/原生侧，不进 JS。
+      // 旧服务端没有 /token/session 时回退到设备令牌，保证功能不中断。
+      var pageToken = deviceToken;
+      String? sessionExpiresAt;
+      try {
+        final session = await _remoteResourceService.issueSaveSessionToken(
+          token: deviceToken,
+          baseUrl: base,
+        );
+        pageToken = session.token;
+        sessionExpiresAt = session.expiresAt?.toIso8601String();
+        _appLogger.emit(
+          level: LogLevel.info,
+          category: 'cloud.auth',
+          event: 'save_session_token_issued',
+          outcome: LogOutcome.succeeded,
+          context: <String, Object?>{'expiresAt': sessionExpiresAt},
+        );
+      } catch (error, stackTrace) {
+        _appLogger.emit(
+          level: LogLevel.warn,
+          category: 'cloud.auth',
+          event: 'save_session_token_unavailable',
+          outcome: LogOutcome.failed,
+          code: 'save_session_unavailable',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
       final script = await _remoteResourceService.fetchAppSyncScript(
-        token: token,
+        token: deviceToken,
         baseUrl: base,
       );
       // 存档面板（右下角悬浮按钮）与同步桥共用同一个 document-start 文件：
@@ -3134,7 +3573,7 @@ class AppController extends ChangeNotifier {
       var panel = '';
       try {
         panel = await _remoteResourceService.fetchAppUiScript(
-          token: token,
+          token: deviceToken,
           baseUrl: base,
         );
       } catch (error, stackTrace) {
@@ -3151,8 +3590,11 @@ class AppController extends ChangeNotifier {
       final buffer = StringBuffer()
         ..write('window.__PVZGE_APP__={base:')
         ..write(_jsStringLiteral(base))
+        // 这里注入的是短时会话令牌，不是设备令牌。设备令牌只留在
+        // 启动器与原生宿主侧；页面即使被恶意资源包读取，拿到的也只是
+        // 一次会话、3 小时后失效的存档读写凭据。
         ..write(',token:')
-        ..write(_jsStringLiteral(token))
+        ..write(_jsStringLiteral(pageToken))
         // 存档按游戏版本隔离：注入当前资源包版本，注入脚本据此分区
         ..write(',gameVersion:')
         ..write(_jsStringLiteral(_playGameVersion()))

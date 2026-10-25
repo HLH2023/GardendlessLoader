@@ -233,6 +233,17 @@ class _StoragePickerDialogState extends State<_StoragePickerDialog> {
         builder: (dialogContext) => SimpleDialog(
           title: Text(dialogContext.strings.storageDialogTitle),
           children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text(
+                dialogContext.strings.storageAndroidCandidatesHint,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.45,
+                  color: dialogContext.garden.inkMuted,
+                ),
+              ),
+            ),
             for (final candidate in candidates)
               SimpleDialogOption(
                 onPressed: () => Navigator.of(dialogContext).pop(candidate.path),

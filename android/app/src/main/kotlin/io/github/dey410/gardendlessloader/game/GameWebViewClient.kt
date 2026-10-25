@@ -30,7 +30,10 @@ class GameWebViewClient(
     private val online: OnlineGameResourceClient? =
         if (session.mode == GameMode.ONLINE) {
             val bridgeFile = java.io.File(session.appRoot, GameActivity.SAVE_BRIDGE_FILE_NAME)
-            val credentials = OnlineGameResourceClient.readBridgeCredentials(bridgeFile)
+            val credentials = OnlineGameResourceClient.readHostCredentials(
+                session.appRoot,
+                bridgeFile,
+            )
             val bridgeScript = runCatching { bridgeFile.readText() }.getOrNull()
             if (credentials != null && !bridgeScript.isNullOrBlank()) {
                 OnlineGameResourceClient(session.origin, credentials.second, bridgeScript)

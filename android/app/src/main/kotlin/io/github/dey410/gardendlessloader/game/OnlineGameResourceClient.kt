@@ -8,6 +8,8 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 
+import org.json.JSONObject
+
 import io.github.dey410.gardendlessloader.logging.AppLogStore
 
 /**
@@ -148,6 +150,23 @@ class OnlineGameResourceClient(
             val token = Regex("""token\s*:\s*"([^"]+)"""").find(script)?.groupValues?.get(1)
             if (base.isNullOrBlank() || token.isNullOrBlank()) return null
             return base.trimEnd('/') to token
+        }
+
+        /**
+         * 原生链路（心跳、在线资源代理）用的凭据：优先读宿主专用的
+         * [GameActivity.NATIVE_TOKEN_FILE_NAME]（长期设备令牌），
+         * 没有时回退到注入脚本里的短时会话令牌。
+         *
+         * 为什么要分开：页面里的会话令牌 3 小时过期，若原生也用它，
+         * 长局心跳会在中途 401；设备令牌不注入页面，JS 读不到。
+         */
+        fun readHostCredentials(appRoot: String, bridgeFile: File): Pair<String, String>? {
+            val bridge = readBridgeCredentials(bridgeFile) ?: return null
+            val nativeFile = File(appRoot, GameActivity.NATIVE_TOKEN_FILE_NAME)
+            val hostToken = runCatching {
+                JSONObject(nativeFile.readText()).optString("token")
+            }.getOrNull()?.takeIf { it.isNotBlank() }
+            return bridge.first to (hostToken ?: bridge.second)
         }
 
         fun joinPath(base: String, path: String): String {

@@ -35,7 +35,8 @@
 |---|---|---|
 | `/_save/app/{load,save,whoami,tokens,history,restore,list,version}` | Bearer（`auth_request`） | 存档 API；`/list`、`/history`、`/restore` 需 `authentik Admins` |
 | `/_save/app-sync.js`、`/_save/app-ui.js` | Bearer | document-start 注入的桥脚本 |
-| `/_save/app/res/*` | Bearer | 资源清单 / zip / APK（Range/ETag） |
+| `/_save/app/res/*` | Bearer | 资源清单 / zip / APK / Windows 更新（Range/ETag） |
+| `/_save/app/res/win/*` | Bearer | Windows 客户端更新：`manifest.json` + `<version>-<code>-windows-x64.zip` |
 | `/_save/online/*` | Bearer | 反代游戏本体；**不做 sub_filter**（避免双份 sync.js） |
 | `/_save/api/*` | authentik `auth_request` | 签发页面用 |
 | `/_res/apk/*` | authentik | 浏览器直接下载 APK |
@@ -92,6 +93,9 @@ python3 tools/build-resource-zip.py            # 打包前会查 /online/status�
 ```bash
 bash tools/publish-apk.sh <apk> --version 0.9.0-hlh.N --notes "…"
 # 落到 /var/www/pvzge-res/apk/ + 更新 manifest.json（App 内检查更新读它）
+
+bash tools/publish-windows.sh <zip> --version 0.9.0-hlh.N --notes "…"
+# 落到 /var/www/pvzge-res/win/ + 更新 win/manifest.json（桌面端检查更新读它）
 ```
 
 ## 8. 备份

@@ -33,12 +33,18 @@ const saveRestorePath = '/_save/app/restore'; // 回滚到指定历史版本
 const saveApkManifestPath =
     '/_save/app/res/apk/manifest.json'; // 应用内更新的 APK 清单，带 Bearer 令牌请求
 const saveApkManifestMaxBytes = 64 * 1024; // APK 清单最大响应体，64KB
+const saveWindowsManifestPath =
+    '/_save/app/res/win/manifest.json'; // Windows 构建清单（zip + sha256），带 Bearer 令牌请求
+const saveWindowsManifestMaxBytes = 64 * 1024; // Windows 清单最大响应体，64KB
 const saveServerDownloadConnectTimeout = Duration(seconds: 20); // 资源下载建立连接的超时时间
 const saveServerManifestMaxBytes = 512 * 1024; // 资源清单最大响应体，512KB
 const saveServerScriptMaxBytes = 2 * 1024 * 1024; // 注入脚本最大响应体，2MB
 const saveServerSavesMaxBytes = 4 * 1024 * 1024; // 存档清单最大响应体（含 meta 摘要），4MB
 const saveServerHistoryLimit = 20; // 存档历史默认拉取条数
 const syncBridgeFileName = '__sync_app.js'; // 云存档注入脚本文件名（与资源槽同级）
+// 原生宿主专用凭据（0600，不注入页面）：心跳/在线代理必须用长期设备令牌，
+// 页面里的 token 只是短时会话令牌，过期后不能把原生链路一起带走
+const nativeTokenFileName = '__sync_native_token';
 const resourceFolderName = 'GardendlessLoader'; // 资源文件夹名称
 const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '0.9.0');
 const announcementTimeout = Duration(seconds: 3); //公告请求超时时间

@@ -167,3 +167,106 @@
 5. 复核并推送服务端仓库三处改动；
 6. 发布后补 `state.json.release.releaseUrl` 并把 `pendingPublish` 置 false。
 7. 把 `HANDOFF.md` 第 2 节更新到 hlh.17（版本、能力矩阵、基线 286），并勾选第 4 节验收项。
+
+## R-20261025-01（追加）/ orchestrator(opencode) / 2026-10-25T14:41+08:00
+
+- status: review
+- 版本: `0.9.0-hlh.17+90017` → `0.9.0-hlh.18+90018`
+- 测试: 334 项（162 服务端 + 172 客户端）；实测 321 通过 / 4 失败 / 1 跳过（均为线上未部署）
+- 产物: APK 58,618,208 B `0d504deb…`（v1+v2+v3）；Windows zip 190,006,698 B `1bd1f647…`
+
+### 缺陷逐条：现象 → 根因 → 改法 → 断言
+
+#### B-05 历史存档保留 1000 → 300
+- **现象**：每个存档键最多堆 1000 份历史，磁盘长期膨胀；且需要确认裁剪不会跨版本误删。
+- **根因**：上限写死在 `server.py` 默认值与 compose 环境变量里；裁剪逻辑本身是按目录做的，
+  但没有断言保护「按版本隔离」和「删旧不删新」这两个前提。
+- **改法**：默认与 compose 都改为 300；历史目录仍为
+  `by-version/<gv>/.history/<key>`，裁剪只在该目录内进行；排序键 `(ts, seq)` 保证同一秒的
+  `ts-n` 按序号保留最新的。
+- **断言**：`test-save-versions.sh` 第 8.5 节 8 条：300 份上限、边界 1104 删/1105 留、
+  同秒序号保留、1.6.2 不受 1.6.1 影响、同版本另一个键不受影响、非历史文件不参与。
+
+#### B-04 令牌对游戏 JS 可见
+- **现象**：注入的 `__sync_app.js` 里直接写设备令牌，恶意第三方资源包可读走长期凭据。
+- **根因**：存档桥必须让页面 JS 发请求，于是把设备令牌原样注入；而设备令牌还能签发/吊销令牌。
+- **改法**：新增 `POST /token/session`（设备令牌换 3 小时会话令牌，不带管理员组、只能读写存档）；
+  页面注入会话令牌；原生心跳/在线资源代理改读 0600 的 `__sync_native_token`（长期设备令牌），
+  避免会话过期把在线登记一起带走；吊销设备令牌连带删除其会话。
+- **断言**：`test-cloud-saves.sh` 8.6 节（可读写、不能签发/吊销、列表不显示、过期 401、吊销连带失效）
+  + `check_game_host_contract.dart`（响应解析、原生凭据文件 Dart/Kotlin 同名、原生优先读宿主凭据）。
+- **残留**：页面仍能拿到会话令牌（这是 Web 存档桥的固有形态）；影响面从「账号凭据」收窄到
+  「3 小时内读写本人存档」。
+
+#### B-08 Windows 自更新
+- **现象**：Windows 只能手动下载替换，没有任何校验。
+- **根因**：更新链路只实现了 APK（aapt badging + 系统安装器）；Windows 没有对应清单与替换机制。
+- **改法**：服务端新增 `publish-windows.sh`（写 `win/manifest.json`，versionCode 回退拒绝、保留 3 个历史）；
+  客户端新增桌面端更新卡片（检查/下载/sha256 校验/打开目录/退出并自动更新）；替换由生成的
+  PowerShell 脚本执行：等进程退出 → 解压校验 exe → 整目录备份 → robocopy → 失败回滚 → 重启 → 清理；
+  安装目录不可写时拒绝启动脚本。
+- **断言**：`check_update_manifest.dart` 22 条（字段校验、versionCode/版本名判定、文件名防穿越、
+  脚本含备份/回滚、BOM+CRLF）；脚本在 Windows 构建机沙盒实测覆盖/保留/清理/退出码 0。
+
+#### B-03 SAF 目录授权（决策：不做）
+- **现象**：安卓只能从候选目录选或手填绝对路径，U 盘等特殊目录体验差。
+- **根因/约束**：SAF 返回 `content://` 树，而游戏 WebView 需要一个真实文件系统根；
+  要支持必须把校验/导入/迁移全部改成 SAF 抽象，属大改造。
+- **决定**：不做。候选列表已覆盖「应用外部目录 + 各外置卷的应用目录」，都是真实可写路径；
+  收益不足以承担回归风险。
+- **改法（可交付部分）**：选择框补充说明文案，告诉用户为什么没有系统选择器、U 盘可手填。
+- **断言**：无代码路径变更；真机按 `docs/acceptance-android.md` 第 4 节复核迁移与门禁。
+
+### verify 输出（原样）
+
+```
+== 文件齐备 ==
+  ok   存在 .handoff/PROTOCOL.md
+  ok   存在 .handoff/HANDOFF.md
+  ok   存在 .handoff/state.json
+  ok   存在 .handoff/docs/01-architecture.md
+  ok   存在 .handoff/docs/02-branches.md
+  ok   存在 .handoff/docs/03-versioning.md
+  ok   存在 .handoff/docs/04-build.md
+  ok   存在 .handoff/docs/05-deployment.md
+  ok   存在 .handoff/docs/06-testing.md
+  ok   存在 .handoff/docs/07-backlog.md
+  ok   存在 .handoff/docs/08-handoff-log.md
+  ok   存在 .handoff/prompts/01-start.md
+  ok   存在 .handoff/prompts/02-return.md
+  ok   存在 .handoff/skills/gardendless-dev/SKILL.md
+
+== state.json 结构 ==
+  ok   OK review suites= 9 total= 334
+
+== 回执完整性 ==
+  ok   OK 3 条回执字段完整
+
+== 敏感信息扫描（.handoff + AGENTS.md + tools/handoff.sh） ==
+  ok   未发现服务器地址/令牌字面量
+
+== 源码敏感扫描（lib/tool/android/.github/pubspec/docs） ==
+  ok   源码与配置未出现服务器地址/令牌
+
+== AGENTS.md 只放持久信息 ==
+  ok   未出现版本号/任务号/测试数字/哈希等易变事实
+
+== Windows 构建脚本编码 ==
+  ok   build-windows.ps1 为 UTF-8 BOM + CRLF（bom-ok crlf=70 lf_only=0）
+
+== 短提示词长度 ==
+  ok   01-start.md 共 9 行（≤14）
+
+== 技能安装 ==
+  ok   已装入 opencode 全局 skills
+
+结果：22 通过 / 0 失败 / 0 警告
+```
+
+### needsHermes（追加）
+1. `bash tools/deploy-save-api.sh` —— 会话令牌 + 历史保留 300 生效；
+2. 重新生成 `app-sync.js` / `app-ui.js` / `app-admin.html` 并落地；
+3. `bash tools/publish-windows.sh dist/gardendless-loader-0.9.0-hlh.18-90018-windows-x64.zip --version 0.9.0-hlh.18`；
+4. 部署后重跑 `test-cloud-saves.sh`，预期 **67 / 0**（当前 54 / 4 / 1 跳过）；
+5. 发布 APK + `gh release create v0.9.0-hlh.18`；
+6. 复核并推送服务端仓库 7 处改动；更新 `HANDOFF.md` 到 hlh.18。

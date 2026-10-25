@@ -905,6 +905,9 @@ class GameActivity : Activity() {
         /** Save-server shim the launcher writes into the resource slot. */
         const val SAVE_BRIDGE_FILE_NAME = "__sync_app.js"
 
+        /** 原生宿主专用凭据文件名（0600，不注入页面）。与 Dart 侧常量保持一致。 */
+        const val NATIVE_TOKEN_FILE_NAME = "__sync_native_token"
+
         /** True while a game host is open; see [LaunchRouterActivity]. */
         @Volatile
         var running = false

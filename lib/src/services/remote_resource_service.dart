@@ -176,6 +176,42 @@ class RemoteResourceCancelled implements Exception {
 /// Every request carries the user's device token as a bearer credential;
 /// nothing here retries or hides a failure — the caller decides what a
 /// failed request means.
+/// 解析 `POST /_save/app/token/session` 的响应。
+///
+/// 单独抽成纯函数：会话令牌是「设备令牌不进页面」的关键一步，格式错了
+/// 会静默回退到设备令牌，必须在验收脚本里直接断言。
+({String token, DateTime? expiresAt}) parseSaveSessionTokenResponse(
+  String body,
+) {
+  final Object? decoded;
+  try {
+    decoded = jsonDecode(body);
+  } on FormatException catch (error) {
+    throw RemoteResourceFailure('save_session_unavailable', error.message);
+  }
+  if (decoded is! Map<String, dynamic>) {
+    throw const RemoteResourceFailure(
+      'save_session_unavailable',
+      'Session token response is not a JSON object',
+    );
+  }
+  final sessionToken = decoded['token'];
+  if (sessionToken is! String || !sessionToken.startsWith('pvz_')) {
+    throw const RemoteResourceFailure(
+      'save_session_unavailable',
+      'Session token response is missing a token',
+    );
+  }
+  final expires = decoded['expiresAt'];
+  return (
+    token: sessionToken,
+    expiresAt: expires is num
+        ? DateTime.fromMillisecondsSinceEpoch(expires.toInt() * 1000,
+            isUtc: true)
+        : null,
+  );
+}
+
 class RemoteResourceService {
   HttpClient? _activeClient;
 
@@ -250,6 +286,31 @@ class RemoteResourceService {
     } on FormatException catch (error) {
       throw RemoteResourceFailure('save_login_unverified', error.message);
     }
+  }
+
+  /// 换取「游戏页专用」的短时存档令牌。
+  ///
+  /// 为什么需要它：游戏页面的 JS 必然能看到注入的凭据（存档桥要用它发请求）。
+  /// 直接注入设备令牌，等于把 10 个长期凭据之一交给页面；一旦用户导入了
+  /// 恶意资源包，令牌就被带走，而设备令牌还能签发/吊销其它令牌。
+  /// 会话令牌只用于存档读写、3 小时过期、随设备令牌吊销而失效，
+  /// 泄露后的影响面从「账号凭据」收窄到「一次会话的存档」。
+  ///
+  /// 旧服务端没有这个接口时抛 [RemoteResourceFailure]，调用方回退到设备令牌。
+  Future<({String token, DateTime? expiresAt})> issueSaveSessionToken({
+    required String token,
+    required String baseUrl,
+    Duration timeout = saveServerRequestTimeout,
+  }) async {
+    final body = await _postJson(
+      _resolve(baseUrl, '/_save/app/token/session'),
+      token: token,
+      timeout: timeout,
+      maxBytes: 64 * 1024,
+      code: 'save_session_unavailable',
+      body: const <String, Object?>{},
+    );
+    return parseSaveSessionTokenResponse(body);
   }
 
   /// The shim the native host injects at document-start; it rewrites the

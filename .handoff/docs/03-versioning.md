@@ -63,6 +63,9 @@ gh release view v0.9.0-hlh.N --repo HLH2023/gardendless-app --json assets --jq '
 - 文件名：`gardendless-loader-<version>-<versionCode>-windows-x64.zip`
 - 由 `tools/build-windows.ps1` 生成，同时输出 `.sha256`
 - 构建机：`ssh win`（见 `04-build.md`），或 GitHub Actions `build-windows.yml`（`windows-latest`，约 14 分钟）
+- 发布到客户端更新通道（服务端仓库）：`bash tools/publish-windows.sh <zip> --version 0.9.0-hlh.N`
+  → 写 `/var/www/pvzge-res/win/manifest.json`（latest + 最近 3 个历史）与 zip；
+  客户端从 `/_save/app/res/win/manifest.json` 读，靠 `versionCode` 判断是否有新版。
 
 ## 6. 存档里的版本语义（易混，单列）
 

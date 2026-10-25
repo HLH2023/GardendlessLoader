@@ -12,6 +12,7 @@
 import 'dart:io';
 
 import 'package:gardendless_loader/src/game_host/game_exit_result.dart';
+import 'package:gardendless_loader/src/services/remote_resource_service.dart';
 
 int passed = 0;
 int failed = 0;
@@ -164,6 +165,70 @@ void main() {
       !exitResultRequiresSignOut(noPlayedMs, hasToken: true));
   check('没有退出结果不动登录态',
       !exitResultRequiresSignOut(null, hasToken: true));
+
+  // 游戏页只应拿短时存档会话令牌；响应解析错了会静默退回设备令牌，
+  // 等于安全修复失效，所以这里把解析契约钉死。
+  final session = parseSaveSessionTokenResponse(
+      '{"token":"pvz_abc","expiresAt":1792920299}');
+  check('会话令牌响应可解析', session.token == 'pvz_abc', session.token);
+  check(
+      '会话令牌过期时间是 UTC',
+      session.expiresAt != null &&
+          session.expiresAt!.isUtc &&
+          session.expiresAt!.millisecondsSinceEpoch == 1792920299000,
+      session.expiresAt?.toIso8601String());
+
+  var missingTokenThrew = false;
+  try {
+    parseSaveSessionTokenResponse('{"expiresAt":1}');
+  } on RemoteResourceFailure {
+    missingTokenThrew = true;
+  }
+  check('缺少 token 的响应必须报错', missingTokenThrew);
+
+  var badPrefixThrew = false;
+  try {
+    parseSaveSessionTokenResponse('{"token":"not-a-token"}');
+  } on RemoteResourceFailure {
+    badPrefixThrew = true;
+  }
+  check('非 pvz_ 前缀必须报错', badPrefixThrew);
+
+  var notJsonThrew = false;
+  try {
+    parseSaveSessionTokenResponse('<html>401</html>');
+  } on RemoteResourceFailure {
+    notJsonThrew = true;
+  }
+  check('非 JSON 响应必须报错', notJsonThrew);
+
+  check('没有 expiresAt 时按未知处理',
+      parseSaveSessionTokenResponse('{"token":"pvz_x"}').expiresAt == null);
+
+  // 原生凭据文件名是跨语言契约：Dart 写、Kotlin 读，拼错时心跳会静默
+  // 退化到短时会话令牌（3 小时后 401），从日志很难看出来。
+  final constants = File('lib/src/constants.dart').readAsStringSync();
+  final nativeName = RegExp(
+          r"nativeTokenFileName\s*=\s*'([^']+)'")
+      .firstMatch(constants)
+      ?.group(1);
+  final kotlinNativeName = RegExp(
+          r'NATIVE_TOKEN_FILE_NAME\s*=\s*"([^"]+)"')
+      .firstMatch(activity)
+      ?.group(1);
+  check('Dart 与 Kotlin 的原生凭据文件名一致',
+      nativeName != null && nativeName == kotlinNativeName,
+      '$nativeName / $kotlinNativeName');
+  check('控制器会写原生凭据文件',
+      File('lib/src/app_controller.dart')
+          .readAsStringSync()
+          .contains('nativeTokenFileName'),
+      null);
+  check('原生优先读宿主凭据再回退桥脚本',
+      File(
+        'android/app/src/main/kotlin/io/github/dey410/gardendlessloader/game/OnlineGameResourceClient.kt',
+      ).readAsStringSync().contains('readHostCredentials'),
+      null);
 
   stdout.writeln('\n结果：$passed 通过 / $failed 失败');
   exit(failed == 0 ? 0 : 1);

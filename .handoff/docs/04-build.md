@@ -88,6 +88,7 @@ gh workflow run build-windows.yml --repo HLH2023/gardendless-app --ref main
 dart run tool/check_local_server.dart          # 43 项：本地服务器
 dart run tool/check_storage_migration.dart     # 62 项：存储迁移 + 日志自愈 + 空间预检 + 事务门禁
 dart run tool/check_desktop_zip.dart <zip>     # 11 项：流式解压 + zip-slip
-dart run tool/check_game_host_contract.dart    # 25 项：原生退出原因契约 + 令牌失效退登判定
+dart run tool/check_game_host_contract.dart    # 34 项：原生退出原因契约 + 会话令牌 + 凭据文件
+dart run tool/check_update_manifest.dart       # 22 项：Windows 更新清单 + 更新脚本编码
 dart run tool/stress_real_pack.dart <big.zip> <targetDir>   # 真实 1.3 GB 包：内存/计数
 ```
