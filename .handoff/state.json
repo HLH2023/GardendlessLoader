@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "project": "GardendlessLoader",
+  "updatedAt": "2026-10-25T14:20:00+08:00",
+  "updatedBy": "hermes",
+  "release": {
+    "versionName": "0.9.0-hlh.16",
+    "versionCode": 90016,
+    "apkSha256": "e8fceb2a2813bc06750e7bb405b142806cc060ad1498640d1da38ad7af6cc0ac",
+    "apkBytes": 58601809,
+    "windowsSha256": "d75821d99954905cfb84e9abe33f00297e8162c63097b11bc3019f0789588ebd",
+    "windowsBytes": 190057219,
+    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.16"
+  },
+  "branches": {
+    "upstream": {
+      "repo": "Dey410/GardendlessLoader",
+      "branch": "main",
+      "role": "作者主线，只读参考"
+    },
+    "origin": {
+      "repo": "HLH2023/GardendlessLoader",
+      "branch": "feature/app-update",
+      "role": "公开 fork，我们的长期工作分支"
+    },
+    "private": {
+      "repo": "HLH2023/gardendless-app",
+      "branch": "main",
+      "role": "私有仓，代码镜像 + 发版资产"
+    },
+    "server": {
+      "repo": "HLH2023/pvzge-server",
+      "branch": "main",
+      "role": "服务端源码（私有）"
+    }
+  },
+  "tests": {
+    "server": 142,
+    "client": 109,
+    "total": 251,
+    "suites": [
+      {
+        "name": "server/cloud-saves",
+        "cmd": "bash tools/test-cloud-saves.sh",
+        "count": 55
+      },
+      {
+        "name": "server/concurrency",
+        "cmd": "python3 tools/test-concurrency.py",
+        "count": 19
+      },
+      {
+        "name": "server/save-versions",
+        "cmd": "bash tools/test-save-versions.sh",
+        "count": 27
+      },
+      {
+        "name": "server/sync-offline",
+        "cmd": "node tools/test-sync-offline.js",
+        "count": 41
+      },
+      {
+        "name": "client/local-server",
+        "cmd": "dart run tool/check_local_server.dart",
+        "count": 43
+      },
+      {
+        "name": "client/storage-migration",
+        "cmd": "dart run tool/check_storage_migration.dart",
+        "count": 55
+      },
+      {
+        "name": "client/desktop-zip",
+        "cmd": "dart run tool/check_desktop_zip.dart <fixture.zip>",
+        "count": 11
+      }
+    ]
+  },
+  "task": {
+    "id": "R-20261025-01",
+    "title": "hlh.17：安卓端到端验收 + 资源包管理 UI 收口 + 已知缺陷清单清零",
+    "status": "dispatched",
+    "dispatchedAt": "2026-10-25T14:00:00+08:00",
+    "dispatchedBy": "hermes",
+    "acceptedAt": null,
+    "acceptedBy": null,
+    "brief": "见 .handoff/HANDOFF.md 第 3 节；短提示词见 .handoff/prompts/01-start.md",
+    "scope": [
+      "安卓真机验收配合（用户执行，agent 负责出验收清单与日志诊断）",
+      "资源包管理 UI 端到端（安装列表/切换/删除/改路径/迁移）在安卓与 Windows 双端一致性",
+      "已知缺陷清单（07-backlog.md 的 P0/P1）逐条修复并补测试",
+      "版本升到 0.9.0-hlh.17 并完成双端构建与发布"
+    ],
+    "outOfScope": [
+      "改动 upstream(Dey410) 分支或向上游提 PR",
+      "把个人服务器地址/令牌写入任何受版本控制的文件",
+      "重启 core 宿主机、改动 frpc(.157) 或路由 iStoreOS(.41)"
+    ]
+  },
+  "receipts": [],
+  "handoffLog": [
+    {
+      "at": "2026-10-25T14:00:00+08:00",
+      "by": "hermes",
+      "event": "dispatch",
+      "task": "R-20261025-01",
+      "note": "hlh.16 发布完成（Windows 本地资源导入打通）；本接力包首次建立"
+    },
+    {
+      "at": "2026-10-25T14:20:00+08:00",
+      "by": "hermes",
+      "event": "security-fix",
+      "task": "R-20261025-01",
+      "note": "清理源码中的服务器域名字面量（tool/check_cloud_saves.dart 默认值）；verify 增加源码敏感扫描；公开仓历史清理列入 B-15 待用户决策"
+    }
+  ]
+}

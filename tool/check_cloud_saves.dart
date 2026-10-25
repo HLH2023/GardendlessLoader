@@ -11,10 +11,9 @@ import 'dart:io';
 
 import 'package:gardendless_loader/src/services/cloud_save_service.dart';
 
-const base = String.fromEnvironment(
-  'PVZGE_SERVER',
-  defaultValue: 'https://<server>',
-);
+// 服务器地址不进源码：必须显式传入
+//   dart run --define=PVZGE_SERVER=https://<your-server> tool/check_cloud_saves.dart
+const base = String.fromEnvironment('PVZGE_SERVER');
 
 Future<Map<String, Object?>> getJson(HttpClient client, String path, String token) async {
   final request = await client.getUrl(Uri.parse('$base$path'));
@@ -30,6 +29,13 @@ Future<Map<String, Object?>> getJson(HttpClient client, String path, String toke
 }
 
 Future<void> main() async {
+  if (base.isEmpty) {
+    stderr.writeln(
+      '缺少 PVZGE_SERVER。用法：\n'
+      '  dart run --define=PVZGE_SERVER=https://<server> tool/check_cloud_saves.dart',
+    );
+    exit(2);
+  }
   final token = Platform.environment['PVZGE_TOKEN'] ?? '';
   if (token.isEmpty) {
     stderr.writeln('缺少 PVZGE_TOKEN');
