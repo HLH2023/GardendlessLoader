@@ -21,17 +21,19 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 
 服务端另有一个私有仓 `HLH2023/pvzge-server`（存档 API + 网关脚本），不在本仓库内。
 
-## 2. 当前状态（hlh.35 已发布；hlh.36 本地构建待实测）
+## 2. 当前状态（hlh.36 已发布，等用户实测）
 
-- **hlh.36 性能轮（未发布，等用户实测）**：APK 58,652,214 B（`ecbe7fac…`）与
-  Windows x64 zip 190,082,823 B（`21e6dc08…`），同为 90036。三处改动：
+- **hlh.36 性能轮（已发布）**：APK 58,652,214 B（`ecbe7fac…`）与 Windows x64
+  zip 190,082,823 B（`21e6dc08…`），同为 90036。两份清单 latest 均为
+  `0.9.0-hlh.36` / 90036，GitHub Release `v0.9.0-hlh.36`（id 426971345，
+  tag 指向 `eee66f7`）。三处改动：
   ① vendor `webview_cef`，vsync 改按窗口所在显示器选 DXGI output（找不到就按该屏
   刷新率兜底，最小化不发 BeginFrame）；② 本地资源服务器给静态资源加
   ETag/Cache-Control（hashed immutable，其余 no-cache+304），HTML 仍 no-store；
   ③ `onLoadEnd` 只对本地 origin 主文档重装桥。安卓另加 `onPause/onResume`
   暂停/恢复 WebView。断言 local-server 46、desktop-channels 69，基线 1310。
-  用户实测通过后再发清单与 Release；根因见 B-78/B-79/B-80。
-- **版本** `0.9.0-hlh.35+90035`，已发布：APK 58,652,226 B（`f2f1f269…`）、
+  根因见 B-78/B-79/B-80。
+- **上一个版本** `0.9.0-hlh.35+90035`：APK 58,652,226 B（`f2f1f269…`）、
   Windows x64 zip 190,980,540 B（`9c1e5b3a…`）。两份更新清单 latest 均为
   `0.9.0-hlh.35` / 90035，GitHub Release `v0.9.0-hlh.35`。hlh.32–hlh.35 修的是
   B-76/B-77「桌面端快捷键」：先修键盘引导时序，再修 `event.code` 为空
@@ -336,6 +338,8 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 - [x] `flutter analyze` 输出 `No issues found!`
 - [x] 客户端 482/482（local-server 46、desktop-channels 69，其余套件未动且复跑通过）
 - [x] APK 90036 与 Windows zip 从最终代码重建（哈希见回执 #29）
+- [x] 两份更新清单 latest=hlh.36/90036；Release `v0.9.0-hlh.36` 含四个资产
+      （回执 #30）
 - [ ] 用户实测：数字/字母热键、F10、F11、全屏、退出、最小化恢复、整体流畅度
 - [ ] 安卓实测：切后台 → 回前台仍能继续游戏且不重载
 

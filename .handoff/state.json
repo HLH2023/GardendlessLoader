@@ -1,26 +1,27 @@
 {
   "schemaVersion": 1,
   "project": "GardendlessLoader",
-  "updatedAt": "2026-10-29T01:20+08:00",
+  "updatedAt": "2026-10-29T01:22:00+08:00",
   "updatedBy": "orchestrator/opencode",
   "release": {
-    "versionName": "0.9.0-hlh.35",
-    "versionCode": 90035,
-    "releasedAt": "2026-10-28T21:50:00+08:00",
+    "versionName": "0.9.0-hlh.36",
+    "versionCode": 90036,
+    "releasedAt": "2026-10-29T01:22:00+08:00",
     "apk": {
-      "file": "gardendless-loader-0.9.0-hlh.35.apk",
-      "size": 58652226,
-      "sha256": "f2f1f269fc4305d1d212c4bfe2b0cc78839727fd34dc1fd5940c3c3f5d582cb9"
+      "file": "gardendless-loader-0.9.0-hlh.36.apk",
+      "size": 58652214,
+      "sha256": "ecbe7fac1d9872d94262e5b9f3c072716b6e807d551204d3c4669675b77567a6"
     },
     "windows": {
-      "file": "gardendless-loader-0.9.0-hlh.35-90035-windows-x64.zip",
-      "size": 190980540,
-      "sha256": "9c1e5b3a56fd14c105c41db6a2637a659ed7c8f070043abee9c940797fc0e0bd"
+      "file": "gardendless-loader-0.9.0-hlh.36-90036-windows-x64.zip",
+      "size": 190082823,
+      "sha256": "21e6dc08d981899dbfae0d2a6f0af0b93a5d4413a6a24f27afa38f8d07d19711"
     },
-    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.35",
+    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.36",
+    "releaseId": 426971345,
     "manifests": {
-      "apk": "latest=0.9.0-hlh.35/90035",
-      "win": "latest=0.9.0-hlh.35/90035"
+      "apk": "latest=0.9.0-hlh.36/90036",
+      "win": "latest=0.9.0-hlh.36/90036"
     }
   },
   "branches": {
@@ -165,8 +166,7 @@
       "发布 APK/Windows 清单与 GitHub Release（等用户手动测试后）",
       "为 CEF 配置持久磁盘缓存（B-22 范围，需单独设计）"
     ],
-    "lastReceiptAt": "2026-10-29T01:20+08:00",
-    "pendingVersion": "0.9.0-hlh.36+90036"
+    "lastReceiptAt": "2026-10-29T01:22:00+08:00"
   },
   "receipts": [
     {
@@ -2989,6 +2989,47 @@
         "多屏/串流下的帧节奏只验证了编译与构建，未做设备测量"
       ],
       "needsHermes": []
+    },
+    {
+      "taskId": "R-20261029-01",
+      "by": "orchestrator/opencode",
+      "at": "2026-10-29T01:22:00+08:00",
+      "status": "review",
+      "readBack": {
+        "taskTitle": "桌面/安卓性能轮：vsync 跟随窗口显示器 + 资源缓存 + 主帧过滤 + 安卓后台暂停",
+        "versionBefore": "0.9.0-hlh.35+90035",
+        "testsBaseline": 1305
+      },
+      "changed": [
+        "发布 hlh.36：APK 与应用内更新清单 latest=0.9.0-hlh.36/90036",
+        "发布 Windows zip 与 win 清单 latest=0.9.0-hlh.36/90036",
+        "GitHub Release v0.9.0-hlh.36（私有仓），tag 指向 eee66f7，四个资产（APK/zip 与各自 sha256）"
+      ],
+      "commands": [
+        "bash /home/hlh/pvzge/tools/publish-apk.sh ... --version 0.9.0-hlh.36 -> manifest 更新: latest=0.9.0-hlh.36 (versionCode 90036)",
+        "bash /home/hlh/pvzge/tools/publish-windows.sh ... --version 0.9.0-hlh.36 --code 90036 -> published ... (190082823 bytes)",
+        "REST POST /repos/HLH2023/gardendless-app/releases -> 426971345 / v0.9.0-hlh.36",
+        "REST uploads x4 -> 201 uploaded（APK 58,652,214 / zip 190,082,823 / 两个 sha256）",
+        "GET manifests -> apk latest=0.9.0-hlh.36/90036, win latest=0.9.0-hlh.36/90036"
+      ],
+      "tests": {
+        "total": 1310,
+        "run": 482,
+        "server": 828,
+        "client": 482,
+        "note": "沿用 #29 的验证；本轮只发布，不重复跑套件。"
+      },
+      "artifacts": [
+        "APK 0.9.0-hlh.36 58,652,214 B sha256 ecbe7fac1d9872d94262e5b9f3c072716b6e807d551204d3c4669675b77567a6",
+        "Windows zip 0.9.0-hlh.36 190,082,823 B sha256 21e6dc08d981899dbfae0d2a6f0af0b93a5d4413a6a24f27afa38f8d07d19711",
+        "GitHub Release https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.36（id 426971345，tag=eee66f7）"
+      ],
+      "remaining": [
+        "用户手动实测 hlh.36（热键/F10/F11/全屏/退出/最小化/流畅度；安卓切后台）",
+        "首页「检查更新」的应用更新分支仍查上游 Dey410 仓库并剥离 -hlh.N，永远看不到个人构建；如需修，另开一轮改为读服务端清单或去掉该分支",
+        "CEF 未配置持久磁盘缓存（B-22）"
+      ],
+      "needsHermes": []
     }
   ],
   "handoffLog": [
@@ -3351,6 +3392,13 @@
       "event": "task-review",
       "task": "R-20261029-01",
       "note": "hlh.36 构建完成，等待用户手动实测"
+    },
+    {
+      "at": "2026-10-29T01:22:00+08:00",
+      "by": "orchestrator/opencode",
+      "event": "release",
+      "task": "R-20261029-01",
+      "note": "hlh.36 已发布：APK/win 清单 latest=90036，Release 426971345"
     }
   ]
 }
