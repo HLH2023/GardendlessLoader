@@ -577,3 +577,797 @@
 - 真机复核：冲突面板下载/保留/关闭/重开一次点中；「保留本机并上传」后云端历史
   有旧版；App 面板单条下载落到系统导出目录。
 - Windows 首次原地更新后复核面板与下载导出。
+
+## R-20261025-04 / orchestrator(opencode) / 2026-10-25T21:40+08:00
+
+### 背景
+hlh.24 已发布。本轮修正存档版本与归属语义，并实现一个账号多份玩家数据。
+**未发版、未部署、未提交**；服务端改动等 Hermes 部署后再做公网 E2E。
+
+#### 云端整包数组导致改 A 推进 B（P0，本轮需求）
+- **现象**：一个账号只能有一份 `PvZ2_PlayerProperties` 文件；两台设备分别改
+  不同玩家时，后写者会把对方的玩家回退；单玩家历史/回滚也无法独立。
+- **根因**：云端把游戏数组当不可分割文件，revision/历史/冲突都按整个键算。
+- **改法**：服务端拆成 `profiles/<uuid>.json` + 原子 `profiles.json`；游戏仍收发
+  数组，`/load` 注入 `__pvz_profile_id`；`/save` 按 `changedProfileIds` /
+  `baseProfileVer` 逐玩家合并，删除只认显式 `deletedProfileIds`；新增
+  `/profile/history`、`/profile/restore`。客户端 sync.js 记录每份玩家的
+  revision + 内容指纹，只上传真正变化的玩家。
+- **断言**：`test-save-versions.sh` 第 11 节 25 条；`test-sync-offline.js`
+  第 17-18 节 9 条；`test-concurrency.py` 12 客户端只有一个写入成功。
+
+#### 同名用户可认领别人的存档（P0）
+- **现象**：路径与权限都按 username，authentik username 可改名/重名。
+- **根因**：缺失 uid 维度的所有权校验。
+- **改法**：nginx 转发 `X-Authentik-Uid`；`identity.json` 绑定 username 目录，
+  同名不同 uid 403；令牌记录 uid，`REQUIRE_UID=1` 时旧令牌要求重新登录；
+  `/list` 与管理页展示 uid 短标识。
+- **断言**：`test-save-versions.sh` 第 11 节「同用户名不同 uid 被拒绝 / 同一 uid 重复通过」。
+
+#### 存档页版本来源混用（P0）
+- **现象**：旧 B-19 在在线形态先补远端版本，但本地查看也可能拿到线上版本；
+  本地无资源时退化为 legacy 查询。
+- **根因**：存档页只有一个 `_playGameVersion()`，没有「查看分区」概念。
+- **改法**：`cloudSavesViewOnline` 默认跟随 playMode，可手动切换；本地查看用
+  `currentGameVersion`，在线查看用服务器清单版本；缺资源/缺在线版本分别返回
+  `local_resource_missing` / `online_version_unavailable`，不再退 legacy；
+  切换只影响查看，运行中会话版本在启动时固定。
+- **断言**：`tool/check_game_host_contract.dart` 5 条（分区取版本、两种失败码、
+  本地用资源版本、generation 作废在途响应）。
+
+#### 桌面端随机端口导致串档/丢失（P1）
+- **根因**：`HttpServer.bind(..., 0)` 每次启动随机端口；localStorage 按 origin
+  （含端口）隔离。
+- **改法**：本地/在线各自首次分配并持久化固定端口；端口占用抛
+  `LocalPortUnavailableException`，启动器明确失败，不静默换 origin。CEF 磁盘
+  缓存仍需原生补丁（B-22，Windows 实机验证）。
+- **断言**：`check_local_server.dart` 9 条；`check_game_host_contract.dart` 3 条。
+
+#### 降级时高版本 localStorage 会被旧游戏读（P0）
+- **现象**：换资源版本不换 origin（Android 本地固定 appassets、桌面本地端口固定），
+  旧版本游戏会直接读到新版本写下的存档，改写 `version` 后可能被同步回云端。
+- **根因**：版本隔离只在云端做，本机没有「上次写入的版本」上下文。
+- **改法**：游戏脚本执行前注入 `local_save_guard`：读 `__pvzSaveContext`，
+  本机版本高于当前资源版本时把四个游戏键备份到 `__pvzBlocked_<旧版本>_<键>`
+  并移出活动键；升级只记录上下文。Android 在 `GameActivity.appendLocalSaveGuard()`，
+  桌面在 `_prepareDesktopGameInternal` 与存档桥一起注入（未登录也生效）。
+- **断言**：`check_game_host_contract.dart` 5 条（上下文键、备份+移除、空版本跳过、
+  Android 顺序、桌面注入）。
+
+#### 普通用户不能回滚自己的存档（P1）
+- **根因**：`/restore` 前有全局 `if not admin` 门禁，后面的本人判断永远走不到。
+- **改法**：移除全局门禁，由各 handler 用 `can_manage()` 校验目标；`/profile/restore`
+  同样本人可用。
+- **断言**：`test-save-versions.sh` 第 11 节权限 3 条。
+
+### 验证（实测）
+- 服务端 **180 通过 / 0 失败**：save-versions 90、concurrency 19、sync-offline 71
+  （cloud-saves 102 需部署后重跑，未计入本轮实测）。
+- 客户端 **208 通过 / 0 失败**：local-server 52、storage-migration 63、
+  desktop-zip 11、game-host-contract 55、update-manifest 27。
+- `flutter analyze`：`No issues found!`
+- `app-sync.js` 由最新 `sync.js` 生成并通过 node --check；与生成物逐字节一致。
+
+### 遗留
+- Hermes 部署：重启 save-api、`deploy-static.sh --check`、nginx uid 转发；
+  详见 `/home/hlh/pvzge/docs/app-cloud-saves.md` 第 10 节。
+- 公网 E2E：真实账号本地/在线版本不同、legacy 继承、多玩家合并/单玩家回滚。
+- 真实用户 uid 目录迁移（B-23）、Windows CEF 磁盘缓存（B-22）。
+
+## R-20261025-04 / orchestrator(opencode) / 2026-10-25T22:19+08:00（review 打回后修复）
+
+- status: review
+- readBack: { taskTitle: "多玩家云存档 + 存档页版本来源修正 + 桌面固定 origin", versionBefore: "0.9.0-hlh.24 (90024)", testsBaseline: "490 项（服务端 282 + 客户端 208）" }
+- 触发：`oracle-sol` 完整 review 判定「阻塞部署」，指出静默丢改动、误删玩家、跨用户提权三类 P0。
+- 修复：
+  1. **新玩家 ID 回填**：服务端分配 `profileId` 后 sync 回填本机数组与 pending；无 ID 的连续编辑不再被 `changedProfileIds` 过滤丢弃。
+  2. **tombstone**：已删除 ID 被旧设备带回 → `profileConflicts`，不复活、不换新 ID；恢复只走 `/profile/restore`。
+  3. **CAS 收紧**：现代协议已存在玩家缺 `baseProfileVer` 直接冲突；`force` 不再隐式删除未见玩家，整包回滚改用 `replace_missing`。
+  4. **sync 基准**：只推进本机真正持有内容的 revision；未见过的云端玩家不进删除集；冲突/未接受不推进基准；延迟 ACK 比较队列值。
+  5. **管理页 XSS**：玩家 coin/gem 统一 `esc()`；回滚携带历史文件名，避免同秒恢复错版本。
+  6. **UID 所有权**：已绑定目录默认拒绝无 uid；首次绑定加文件锁；`IDENTITY_CLAIM=strict` 阻止旧目录被同名请求认领；过渡开关 `ALLOW_LEGACY_NOUID` 默认关闭。
+  7. **本机版本保护**：按版本归档/恢复游戏键与同步状态；降级后推进 context；连续启动同版本不覆盖备份；升级恢复目标版本自己的存档。Android 改为读取 Dart 生成的 `__local_save_guard.js`，不再维护两份逻辑。
+  8. **换账号隔离**：按 uid 归档上一账号的本地存档与 pending；`/load` 失败时不上传；迁移只回写 migrated 键且不覆盖本地 pending。
+  9. **单玩家回滚**：只替换该玩家，B 的 pending 保留；重放只带 B。
+  10. **其余**：历史/回滚逐键来源；请求 generation+token+user+view+version 校验；本地形态也能取在线清单；旧服务端无 profiles 时展示全部 entries；端口首次持久化失败停掉已绑定 server；删除玩家键同时清 manifest；破坏性接口非法版本 400；删除/回滚前留最新历史快照。
+- 实测：save-versions 114/0、concurrency 28/0、sync-offline 107/0（Web 与 App 各一遍）、sync-live 8/0、local-server 52/0、storage-migration 63/0、desktop-zip 11/0、game-host-contract 73/0、update-manifest 27/0、cloud-saves 离线 9/0、local-save-guard 15/0；`flutter analyze` 无告警；Android compile + viewport 单测通过。
+- 新基线：**609 项（服务端 359 + 客户端 250）**；`cloud-saves` 102 仍待部署后复跑（新增 2 条静态转义断言，预计 104）。
+- 未做：B-26 多玩家提交崩溃一致性、B-27 桌面端口重置入口、B-28 整包回滚跨事务边界；服务端未部署、APK/Windows 未重建、未提交。
+
+## R-20261025-04 / orchestrator(opencode) / 2026-10-25T22:43+08:00（冲突应用 + CEF 日志上限）
+
+- status: in_progress
+- 触发：用户报告 Web 冲突面板选「下载最新云端」只下载 JSON、没有应用到 localStorage；另外实机 CEF `debug.log` 涨到 250 GB。
+- 修复：
+  1. **冲突面板应用云端**：面板本来就只在运行时出现，「用云端覆盖本机」却被 `phase === 'runtime'` 隐藏，只剩下载 JSON。现在改为「用云端存档（覆盖本机并重启）」，下载降级为「下载备份（JSON）」。
+  2. **启动前应用快照**：面板/冲突页不再直接写游戏键（游戏内存里的进度会在卸载时盖回去），改为写 `__pvzAdoptCloud`；`sync.js` 启动时在 `/load`、冲突判定和游戏读档之前应用：写键、对齐 meta、丢弃这些键的 pending、玩家基准用快照的 `profileVer`。快照带版本 + 30 分钟 TTL，标记期间禁止上传。
+  3. **CEF 日志上限**：`windows/runner/cef_log_limit.cc` 每 15 秒检查 exe 目录与工作目录的 `debug.log`，超过 32 MB 清空；实机验证 CEF 共享写句柄可在运行中裁剪。
+  4. **移动端日志配额**：Android/OHOS/iOS 原来只在进程启动时清理一次，换段时补一次总量清理，并跳过正在写的段——长时间运行不会突破 10 MB 配额。
+- 实测：sync-offline 120/0（Web 与 App 各一遍）、update-manifest 32/0、game-host-contract 76/0、`flutter analyze` 无告警；MSVC `/W4 /WX` 编译 `cef_log_limit.cc` 通过；Windows 实机裁剪探针 `truncate=ok`、文件从 0 重新增长；Android `compileDebugKotlin` + `GameViewportSizeTest` 通过。
+- 新基线：**630 项（服务端 372 + 客户端 258）**。
+- 未做：Windows 包未重建（上限未进产物）、服务端/静态文件未部署、本轮新代码等 oracle-sol 额度恢复（2026-10-26 01:13）后复核。
+
+## R-20261025-04 / orchestrator(opencode) / 2026-10-25T22:52+08:00（部署）
+
+- 用户要求先部署并重新生成产物（原计划交 Hermes）。
+- 备份：`backups/20261025-pre-deploy-saves.tgz`（15 MB 源数据）、`...-static.tgz`、`...-nginx.conf`；源数据 476 个文件 sha256 清单，部署后 `sha256sum -c` rc=0。
+- 静态：`tools/deploy-static.sh` 部署 6 个源文件 + 重新生成 `app-sync.js`/`app-ui.js`/`app-admin.html`；`--check` 全 ok，无 DRIFT。
+- 服务端：`docker restart pvzge-save`（挂载 `/home/hlh/pvzge/save-api`），`/healthz` ok；探针 `/load` 已返回 `profiles`/`profileVer`/`keySources`/`restoredProfiles`，探针用户已删除。
+- 验收：`tools/test-cloud-saves.sh` **108 通过 / 0 失败 / 0 跳过**（经本机 nginx `--resolve`，含新增冲突面板快照断言）。
+- 未做：nginx `X-Authentik-Uid` 转发（本机无 root，`nginx -t` 还受证书权限限制）→ 交 Hermes；完成前 `akadmin` 不绑定 `identity.json`，旧 App 令牌仍可用。
+- 新基线：**636 项（服务端 378 + 客户端 258）**。
+- 追加（22:55）：得到 root 授权后完成 nginx 部署——`/_save/api/load` 与 `/_save/api/` 增加
+  `auth_request_set $save_uid` + `proxy_set_header X-Authentik-Uid $save_uid`，`nginx -t` 通过并
+  reload；Bearer 通道仍显式清空 uid。配置备份 `nbpc-gateway.conf.bak-20261025-225534`。
+- 影响：`akadmin` 下次登录会绑定 `identity.json`；现有 13 个令牌均无 uid，旧 App 设备令牌届时
+  401，需要在 App 重新登录（必要时临时 `ALLOW_LEGACY_NOUID=1` 过渡）。
+
+## R-20261025-04 / orchestrator(opencode) / 2026-10-26T00:45+08:00（Web + Android E2E，自动上传修复）
+
+- 触发：用户反馈「手动上传没问题，自动上传似乎不及时，最新的应该是手动上传的版本」。
+- 根因 1（手动上传基准）：管理页上传成功只改云端 revision，没有推进同源游戏标签页的
+  `__pvzCloudProfiles`；游戏下一次自动上传仍带旧基准 → `PROFILE CONFLICT`。修复：
+  上传成功后合并响应 `profileVer`/`ver` 到同源 localStorage；跨源 App iframe 保持不动。
+  服务端同时返回 `profileUnchangedIds`，内容未变时客户端也能推进基准。
+- 根因 2（纳秒版本号）：非玩家键 `baseVer` 是 1.7e18 纳秒，浏览器 double 回传会舍入
+  （...477579 → ...477600），服务端精确整数比较永远 `stale_base`。修复：
+  `same_save_version()` 按 double 相等判断同一版本；真实写入仍冲突。
+- 实测（部署后）：`test-save-versions.sh` **126/0**、`test-concurrency.py` **28/0**、
+  `test-cloud-saves.sh` **108/0/0**、`test-sync-live.js` **9/0**、
+  `test-sync-offline.js` **139/0**（Web+App）、`test-admin-baseline.js` **16/0**；
+  `flutter analyze` 无告警；client 五套 52/63/76/32/15 + desktop-zip 11 + cloud-saves 离线 9 全绿；
+  Android `:app:testDebugUnitTest` 全绿（新增 OnlineGameResourceClientTest 3 项）。
+- Web E2E（临时 authentik 用户 `zz-e2e-20261025`，uid f202ce7b…，测试后清理）：
+  账号切换隔离（akadmin 本地 pending 未上传到测试账号）；T1/T2 两个玩家 ID 回填
+  dd00da60…/c5d6ec0e…；手动上传后自动上传 777/666 无冲突；运行时冲突面板本机 888 /
+  云端 999，「用云端存档」重启后本机 999、pending 清空；启动冲突页「使用云端」→ 999、
+  「保留此设备」→ 云端 2222；管理页基线推进到 a99bf372/61223ce4。
+- Android E2E（`pvzge_api35`，debug APK 用 `--dart-define=PVZGE_SERVER=<server>`
+  重建）：原生 LoginActivity 登录成功；Saves 页显示账号、Account ID f202ce7b、两名玩家
+  T1 2222/5（ID dd00da60…）、T2 666/7（ID c5d6ec0e…）；本地/在线版本切换正常
+  （本地无资源包提示）；T1 历史 9 版，回滚到 999 成功（新 rev ce3e9083，2222 保留在历史）。
+- 发现并修复 B-32：Kotlin `readBridgeCredentials` 只认双引号，而 Dart 生成单引号桥，
+  在线资源代理判成 `online_bridge_missing` → 游戏 WebView 401。正则改为单/双引号，
+  新增 JVM 单测 3 项；`app/build.gradle` 加 test 用 org.json。
+- 自审发现并修复 B-36（多设备静默丢档）：`save_players` 对「不在 changedProfileIds、
+  但内容与云端不同」的旧副本走 changed=False 并保留云端；`profileUnchangedIds`
+  又把它登记成已同步，客户端把基准推进到云端 revision + 本机旧内容 hash，下一次编辑
+  会带云端 revision 静默覆盖另一台设备的进度。修复：只有逐字节一致才回报 unchanged。
+  新增 5 条回归（121→126），生产实例 126/0；`test-sync-live.js` 加 1 条真实 sync.js 集成（8→9）；顺带修第 12 节测试隔离
+  （`/save` 用 zz-mp2-test、`/delete` 却删 zz-newmp-test，二次运行必挂）。
+- 另修管理页基准推进的版本边界：PAGE_GV 为空（管理页没识别到分区）时，
+  响应里的 legacy revision 不能混进游戏标签页的 0.16.1 基准；现在要求
+  PAGE_GV 明确且等于 base.gv 才推进。test-admin-baseline 11→13。
+- 未完成：修完桥后在线游戏在模拟器首屏 WebView 渲染进程 crashpad 崩溃 + ANR，
+  需真机/硬件 GPU 复测（B-33）；Windows 包仍未重建；iOS/OHOS 日志改动未在本机构建。
+- 新基线：**684 项（服务端 426 + 客户端 258）**；等待 01:13 后交 oracle-sol 复核。
+
+## 2026-10-26 02:06 — oracle-sol 第三轮 P0/P1 修复
+
+第三轮复核在上一轮修复后仍复现 8 条：force 绕过单飞（3→2）、migrated 覆盖启动
+冲突、换号丢目标 pending、单玩家回滚后旧 pending 复活、generation 未覆盖普通恢复/
+flush 竞态/applyCloudSave、pump 不排空持久队列、删除 ACK 的 unchanged/新玩家遗漏、
+管理页老服务端 fallback 把「发过」当「确认」。
+
+修复落在 `save-api/sync.js` 与 `save-api/admin.html`：force 与普通上传共用 inflight
+通道并在 onloadend 汇合；迁移只回写 `loadConfirmed`；换号/回滚后重读 pending；
+所有接管入口推进 `__pvzSyncGeneration`，同步流程写统一走 `guardedWrite`（写前检查 +
+写后复检回滚）；pump 在内存空时 drain 持久队列；删除 ACK 接受判定统一；admin
+要求 `saved` 明确包含玩家键。
+
+`test-sync-offline.js` 139→163（Web/App 各一遍）、`test-admin-baseline.js` 16→19；
+save-versions 126/0、sync-live 9/0、cloud 108/0/0、concurrency 28/0；服务端 453、
+总 711。静态已部署（sync.js `75274718…`、admin.html `a53ac376…`、
+app-sync.js `0461caf6…`），deploy-static --check 9 项全 ok。生产 `akadmin`
+18:03–18:04 连续 200 /save，无 BLOCKED/CONFLICT。残余 B-38（同时正常游玩仍无
+活跃写者租约）按 P2 记录。已重新提交同一 oracle-sol 会话复核。
+
+## 2026-10-26 03:15 — oracle-sol 前手工复核第五轮
+
+在等 oracle-sol 额度（06:16 重置）期间逐段复核 `sync.js` / `server.py` / `admin.html`，
+又找到并修掉以下问题（先补断言再修，新增 sync-offline 28 条、save-versions 11 条）：
+
+1. **运行期换号**：`/save` 增加 `expectedUid`，服务端在当前会话 uid 不一致时 403
+   `identity changed` 且不写入；客户端保队列、停止后续上传并发
+   `pvz-save-identity-changed`。管理页手动上传先比对 `__pvzSyncUser` 并携带
+   `expectedUid`，避免把 A 的本机档写进 B。
+2. **force 200 不可解析**：旧代码把 HTTP 200 的 HTML/代理错误当「全部接受」清队列；
+   现在与普通 send 同一判据，保留 pending 并发失败事件。
+3. **版本不匹配首传**：云端只有更高版本时，firstUpload 不再把本机碰巧存在的旧档
+   塞进 pending（否则升级后被当成未上传改动重放）。
+4. **整包回滚身份**：兼容镜像保留 `__pvz_profile_id`；`/restore` 显式 `allow_restore`，
+   旧快照无 ID 时按位置/唯一名字从 tombstone 找回原 ID；管理员代回滚时
+   ownerUid/ownerUsername 仍归属目标目录。
+5. **单玩家回滚回插**：本机已删除的玩家被管理员从历史恢复后，重新插回 local 与
+   pending 并更新基准，避免下一次上传再次 `deletedProfileIds` 删掉回滚。
+6. **删除重置回滚标记**：删除玩家键时清 `.meta` 的 `restoredAt/restoreSource`，
+   新档不会被旧回滚标记误伤。
+7. **原生写入 fencing**：回填 profileId、单玩家回滚、运行时「用云端」统一走
+   `guardedRawWrite`（写前检查 + 写后复检回滚）；adopt 接管竞争失败保留 marker。
+
+实测：sync-offline **225/0**（Web 与 App 各一遍）、admin **19/0**、save-versions
+**137/0**、sync-live **9/0**、concurrency **28/0**、cloud-saves **108/0/0**；静态
+`deploy-static.sh --check` 9 项全 ok。服务端 **526** + 客户端 **258** = **784**。
+`analyze` 与客户端 258 项本轮未改 Dart/Kotlin，未重跑，沿用上一轮全绿证据。
+
+未做：本轮 `server.py` 改动尚未重启 `pvzge-save` 加载（生产仍在跑上一版，
+expectedUid 等保护未生效）；静态 `sync.js`/`admin.html` 已部署。oracle-sol
+额度 06:16 重置后复核；复核通过前不关闭任务，也不清理临时 E2E 账号
+`zz-e2e-20261025`。
+
+## 2026-10-26 04:10 — oracle-sol 前手工复核第六轮
+
+在等额度重置期间继续逐段复核 `sync.js` / `server.py` / `conflict.html` / `ui.js`，
+又找到并修掉 6 类问题（先补断言再修，新增 sync-offline 18 条、save-versions 5 条、
+cloud-saves 3 条静态断言）：
+
+1. **换号归档写失败会丢本机存档**：`switchUser` 先写归档再无条件清本机键，配额满/
+   隐私模式下 setItem 静默失败 → 唯一存档被删。改为逐键归档读回校验，失败中止
+   换号、保留旧账号存档、本页放弃云同步并提示刷新；恢复目标账号归档同样只有
+   落地成功才删归档。
+2. **generation 写失败无限 reload**：`takeOverDocument` 写 `__pvzSyncGeneration`
+   失败仍推进内存 generation，`writerStale()` 恒真 → 恢复/基准发布反复 reload。
+   改为写后读回校验，失败不推进、降级为旧行为继续启动。
+3. **profileId 回填张冠李戴**：`resp.profiles` 里「云端有、本次没发」的玩家按
+   提交后 index 返回，可能与请求在途期间新建的同名玩家位置重合，导致下一次保存
+   覆盖那份云端进度。只回填本次发送数组内同位置、内容哈希未变的条目。
+4. **跨版本 pending 覆盖新版本**：升级后旧版本离线改动会被当成「本机更新」传进
+   新版本 exact 分区。启动时若上次同步版本不同且云端当前版本已有该键，丢弃该键
+   的旧 pending（转正常冲突/恢复）；只有 migrated/none 才允许升级搬运。
+5. **冲突页跨账号写入**：冲突页「保留此设备」是独立页面直接 `/save`；改为上传前
+   重新 `/load` 复核账号、用最新 `ver` 做基准、带 `expectedUid`、响应身份不一致
+   即停止；摘要字段加转义。
+6. **设备元数据覆盖回滚标记**：玩家键的 `record_device` 在 profile 锁外做整文件
+   读改写，会和 `/profile/restore`、`/restore` 的 `restoredAt` 交错。移入
+   `save_players` 的 profile 锁内，且只记真正写入玩家文档的请求。
+
+实测：sync-offline **243/0**（Web 与 App 各一遍）、admin **19/0**、save-versions
+**142/0**、sync-live **9/0**、concurrency **28/0**、cloud-saves **111/0/0**；静态
+`deploy-static.sh --check` 9 项全 ok（2026-10-26 04:03）。服务端 **552** + 客户端
+**258** = **810**。`analyze` 与客户端 258 项本轮未改 Dart/Kotlin，沿用上一轮证据。
+
+部署：`sync.js` `8f165297…`、`app-sync.js` `e78d5b3e…`、`ui.js` `1ed0de76…`、
+`conflict.html` `b3f20448…`；`admin.html`/`app-admin.html` 未变。`server.py` 源码
+`8105df2a…`（118128 B）**仍未重启加载**：`expectedUid`、整包回滚身份/owner、
+删除重置标记、设备元数据入锁要等低峰窗口 `docker restart pvzge-save`。
+oracle-sol 额度 06:16 重置后复核；复核通过前不关闭任务，也不清理
+`zz-e2e-20261025`。残余 P2：B-49（冲突页不能表达玩家删除）、B-50（管理页手动
+上传新建玩家不推进基准）、B-51（/restore 镜像/标记先于 manifest）、B-52（adopt
+清整条 pending）。
+
+## 2026-10-26 09:25 — 生产重启加载最新 server.py
+
+用户确认在低峰窗口重启。执行 `docker restart pvzge-save`，容器 09:25:55 CST 启动，
+`/healthz` ok。重启后验证：
+
+- 临时用户 `zz-verify-20261026`（已清理）：`/save` 带 `expectedUid=uid-other` →
+  **403 identity changed during save**，不写入；带 `expectedUid=uid-verify` → 200，
+  `saved=['PvZ2_Settings']`、响应 `owner_uid=uid-verify`，`/load` 的
+  `device.PvZ2_Settings.id = verify-dev`（设备元数据入锁生效）。
+- 真实 `akadmin` 只读 `/load?gameVersion=0.16.1`：1 个玩家（NBMAN）、4 个键、
+  `load_kind=exact`；`PvZ2_PlayerProperties.json`/`profiles.json` mtime 仍为
+  10-25 22:58，未被读操作改写。
+- `test-cloud-saves.sh` 重启后 **111 通过 / 0 失败 / 0 跳过**。
+- 源码 `8105df2a…`（118128 B）；回滚备份 `/tmp/opencode/server.py.before-review2`
+  （112544 B，第五轮前源码）。
+
+B-45 关闭。剩余：oracle-sol 最终复核（已提交）、临时 E2E 用户清理、APK/Windows 重建、
+B-49..B-52 的已知边界。
+
+## 2026-10-26 10:20 — oracle-sol 最终复核修复（8 类 P1 中 7 类）
+
+oracle-sol 判定上一版不可交付，给出 8 类 P1。本轮按文件分工修复并补断言：
+
+1. **接管失败仍发布基准 / 运行期 adopt 不换 epoch**：`takeOverDocument` 增
+   `force`；generation 写失败返回 false + `takeoverFailed`，启动恢复只落地
+   内容、不发布基准/不装 hook（`syncDisabled` + toast）；运行期「用云端存档」
+   强制开新 generation；已接管且 generation 有效时重复调用视为成功。
+2. **换号目标账号恢复不完整**：`switchUser` 改为归档→清空→恢复游戏键/状态/
+   目标 pending→逐项读回；任一失败回滚旧账号内容与 pending，目标归档成功
+   后才删。接管 carry 失败时旧槽是唯一副本，换号会归档/回滚它。
+3. **管理页 A 数据 + B 身份**：点击时同时捕获 data、`__pvzSyncUser`、
+   `__pvzSyncGeneration`；`/load` 预检检查 `r.ok`，返回后与 `/save` 发送前
+   各复核；`expectedUid` 仍用预检 uid。
+4. **写后补偿不构成 CAS**：不再把 prev 写回；只有当前值仍是本次写入时才删，
+   并写 `__pvzResync` 指纹（含内容哈希）；启动按云端重建，pending 不同则
+   保留重放。真串行化仍缺（B-53）。
+5. **采用云端写失败仍推进基准**：`applyAdoptedCloud` / `applyCloudSave` 写
+   游戏键后读回；失败保留 marker/pending、不写 meta/基准、不 reload 成半套用。
+6. **版本保护不隔离账号/ generation 槽**：`local_save_guard.dart` 备份键改为
+   `账号+版本`，版本变化归档所有 `__pvzPending:<gen>`，恢复时并回基础队列；
+   `__pvzPendingGv` 随版本归档/恢复，缺失时补写。
+7. **降级 pending 被 migrated 搬运**：sync 新增 `__pvzPendingGv` 与方向比较，
+   降级全丢、升级只丢 exact；版本保护同时把高版本槽移出活动区。
+8. **/load 旧内容 + 新基准**：每个 key 的读取、stat mtime/纳秒版本、meta/
+   回滚事件都在同一把 `save_lock` 内；`load_players` 加 `_lock_held` 避免
+   flock 重入。另修 P2：`restoredProfileEvents` 毫秒级事件（连续 A/B 不再
+   只看到最后一个）、tombstone 取消 100 条截断、空档弹窗 `esc()`。
+
+实测：sync-offline **287/0**（Web 与 App 各一遍）、save-versions **159/0**、
+cloud-saves **115/0/0**、concurrency 28/0、sync-live 9/0、admin 19/0、
+local-save-guard **42/0**、game-host-contract 76/0、`flutter analyze` 无告警。
+服务端 **617** + 客户端 **285** = **902**。
+
+部署：静态 2026-10-26 10:08 已部署，`deploy-static.sh --check` 9 项全 ok
+（sync.js `d6d94c8f…`、app-sync.js `34c322bd…`、ui.js `aaa0ca2e…`、
+app-ui.js `acf42fad…`、admin.html `06447169…`、app-admin.html `8285f616…`、
+conflict.html 未变）。`server.py` `5b5bf221…`（125080 B）已在本机 8093 临时
+实例跑 159/28/9/19，但**生产容器仍跑 09:25 的旧进程**，需低峰重启加载。
+残余 P1：B-53（多标签页无真串行化）。B-49..B-52 仍为已知边界。
+
+## 2026-10-26 10:10 — 生产重启加载 5b5bf221
+
+用户确认白天重启。`docker restart pvzge-save` 后容器 10:10:45 CST 启动，
+`/healthz` ok，容器内 `/app/server.py` sha256 `5b5bf221…`。重启后验证：
+
+- 临时用户 `zz-verify-20261026b`（已清理）：`expectedUid` 不一致 → 403
+  `identity changed`；一致 → 200 `saved=['PvZ2_Settings']`。
+- 真实 `akadmin` 只读 `/load?gameVersion=0.16.1`：1 个玩家（NBMAN）、4 个键、
+  `load_kind=exact`、`restoredProfiles=[]`；`profiles.json`/玩家镜像 mtime 仍为
+  10-25 22:58。
+- 临时用户 `zz-restore-ev-20261026`（已清理）：两份玩家历史连续 restore A、B，
+  `/load` 的 `restoredProfiles` 同时包含两份，`at` 毫秒级不同
+  （1792980700068 / 1792980700099），证明不再只保留最后一个。
+- `test-cloud-saves.sh` 重启后 **115 通过 / 0 失败 / 0 跳过**。
+- 回滚备份：`/tmp/opencode/server.py.before-0626-restart`（8105df2a…，118128 B）；
+  更早的 review2 备份仍在。
+
+## 2026-10-26 11:05 — 第八轮：二次复核后的手动修复与手工复核
+
+用户要求本轮不再调用 oracle-sol，由 orchestrator 逐段手工复核。二次复核共列
+9 条 P1 + 1 条 P2，本轮修掉 8 条 P1 与 P2-1：
+
+1. 单玩家回滚接管失败：不发布新 revision/seen/pending，进入停用。
+2. 换号 `__pvzSyncUser` 写后读回，失败整体回滚旧账号（含账号标记）。
+3. guard 只归档当前 generation 槽；无主槽不读不归档不删。
+4. 账号归档键加 gameVersion；低版本不恢复高版本账号内容。
+5. `writePendingRaw` 不再改写 `__pvzPendingGv`；迁移/carry 保留来源版本。
+6. guard 三类归档全部读回确认；任一失败不清源、不推进上下文，并阻断目标
+   版本读取/写入游戏键（读/写门闩 + `window.stop()` + 提示）。
+7. adopt 只在全部内容确认后删旧 pending；失败保留 marker/旧槽。
+8. `syncDisabled` 仍装只记本机 pending 的 local-only hook。
+9. 管理页迟到 ACK 写共享基准前三次复核身份快照（P2-1）。
+
+额外手工复核发现并修：恢复/采用云端部分写失败时回滚已落地键；恢复写循环
+中途被接管直接 reload，不再带着半状态启动。
+
+验证（真跑）：sync-offline Web/App 各 **339/0**、save-versions **159/0**、
+cloud-saves **117/0/0**、admin **21/0**、sync-live **9/0**、concurrency
+**28/0**、guard **65/0**、game-host **76/0**、local-server 52/0、
+storage-migration 63/0、desktop-zip 11/0、update-manifest 32/0、
+check_cloud_saves 9/0；`flutter analyze` 无告警。总 **981**（服务端 673 +
+客户端 308）。
+
+静态 **2026-10-26 10:57 / 11:04** 部署，`deploy-static.sh --check` 9 项全 ok：
+`sync.js` `d9dc302c…`（138178 B）、`app-sync.js` `4c409359…`、
+`ui.js` `083183f0…`、`app-ui.js` `963ac27c…`、`admin.html` `31435147…`、
+`app-admin.html` `dcf3b2a2…`、`conflict.html` 未变。服务端 `server.py`
+`5b5bf221…` 已于 10:10:45 加载，本轮无需重启。
+
+剩余唯一 P1：**B-53**（Web 多标签页无真正跨上下文互斥）。App/Android 有
+`GameActivity.running` 单实例门禁；Web 的完整方案需要入口页持 Web Locks、
+游戏放在 iframe，不能在现有同步注入架构里打补丁。另有 B-58..B-62 五个 P2
+边界已记入 backlog。
+
+## 2026-10-26 11:45 — 第九轮：Web 单标签页门闩 + 删除在线游玩
+
+用户接受「Web 同一浏览器只开一个游戏标签页」并要求代码强制，同时删除启动器
+在线游玩模式、只保留本地资源包。
+
+**Web 单标签页**：`sync.js` 末尾用 `navigator.locks` 获取 `pvzge-game-writer`
+生命周期锁（持有到页面卸载）。第二个标签页拿不到锁就 `window.stop()` + 覆盖
+提示，不再产生游戏写入；锁回调前的游戏键写入进内存缓冲，grant 后经上传 hook
+落盘，blocked 后丢弃；`guardedRawWrite` 检查 `window.__pvzWriterBlocked`；
+缓冲 clear 先清后补写。无 Web Locks 的 Web 主机 fail closed；App/本地回环
+origin 按单实例放行。断言 sync-offline `[80]-[85]`，Web/App 各 **381/0**。
+
+**删除在线游玩**：`PlayMode`/`playMode`/`desktopOnlinePort`、在线资源代理/
+心跳/桌面 upstream/在线会话 origin 全部移除；只保留本地资源包。登录、云存档、
+资源下载、APK/Windows 更新检查保留。旧 JSON 的 `playMode:"online"` 与
+`desktopOnlinePort` 显式忽略，账号/服务器/令牌/主题/语言/`desktopLocalPort`
+保持原值；存档页默认本地分区，手动切在线分区保留；`_ensureOnlineGameVersion`
+改名 `_ensureRemoteGameVersion` 供在线分区取版本。Android 删除
+`OnlineGameResourceClient`/`OnlineSessionHeartbeat` 及对应 JVM 测试。
+
+验证：`flutter analyze` 无告警；local-server **42/0**、storage **63/0**、
+desktop-zip **11/0**、game-host-contract **73/0**、update-manifest **32/0**、
+check_cloud_saves **9/0**（在线段缺 token 跳过）、guard **65/0**；
+Android `:app:testDebugUnitTest --rerun-tasks` 10 类 / **46/0**；
+sync-offline **381/0**（Web/App）；cloud-saves **117/0/0**。
+总基线 **1010**（服务端 715 + 客户端 295）。静态 11:27 部署，
+`deploy-static.sh --check` 9 项一致；`server.py 5b5bf221…` 无需重启。
+
+B-53 关闭（单标签页门闩）；B-01/B-32 随在线玩法删除关闭；B-33 改为本地资源包
+真机复测；新增 B-63（旧 `__sync_native_token` 清理边界）。APK/Windows 包未重建。
+
+## 2026-10-26 13:05 — 第十轮：Web 顶层锁 + 游戏 iframe，修 oracle-sol P1
+
+`oracle-sol` 对第九轮给出「不可交付」：5 条 P1，核心是 Web 锁在 `sync.js` 末尾，
+第二个标签页在拿锁前已经 `/load`、恢复、推进 generation，正在游玩的页未上传
+改动会被判废。第九轮的门闩只挡游戏键，挡不住 boot 本身和 blocked 页的迟到
+ACK/失败重试。
+
+**P1-1**：Web 顶层不再跑同步 boot。`sync.js` 先请求 `pvzge-game-writer`；
+`lock === null` 就 `window.stop()` + 覆盖提示，不 `/load`/不创建 iframe。
+grant 后创建同源 iframe，游戏在子 frame 执行同一份 `sync.js`（子 frame 识别
+父页 `__pvzWriterHost`，不再争锁）；父页持锁到卸载。App/本地回环走原同步
+boot。断言 `[86]`：顶层不 `/load`、gen 不变、第二个标签页无 iframe/无上传。
+**P1-2**：门闩 pending 阶段所有键进影子区；blocked 后 `send/requeue/pump/
+flush/drainPending/ACK/onerror` 全部拒绝，定时器清空。断言 `[87]`。
+**P1-3**：运行期 `applyCloudSave()` 逐键/meta/玩家基准/pending 快照，任一步
+失败回滚；回滚再失败就置 `__pvzRuntimeWritesBlocked` 停止本局写档。断言 `[88]`。
+**P1-4**：`_ensureRemoteGameVersion` 捕获令牌+服务器+代际，写 `_remoteManifest`
+和调 `_handleTokenRejected` 前复核；换服/换号清空 `_remoteManifest`。
+**P1-5**：guard 原子写（临时→读回→rename→再读回），失败抛出阻止启动；新增
+`localSaveGuardRequired` 贯通 Dart→Kotlin，Android required 时缺失/空白/读取
+失败 fail closed。
+**P2-1**：`clear()` 后未重写的键读 null。
+**P2-2**：`APP_SYNC` 现在切换整套 411 条用例的源，删掉 `|| true`。
+
+验证（真跑）：`flutter analyze` 无告警；sync-offline **411/0**（Web/App 各
+一遍）、save-versions **159/0**、concurrency **28/0**、sync-live **9/0**、
+admin **21/0**、local-server **42/0**、storage **63/0**、desktop-zip **11/0**、
+game-host-contract **83/0**、update-manifest **32/0**、cloud-saves 离线 **9/0**、
+guard **65/0**；Android JVM **46/0**。总基线 **1050**（服务端 745 + 客户端
+305）。Playwright 冒烟：顶层锁 grant→iframe、子 frame boot、第二页 blocked；
+游戏页在 iframe 中 canvas 1280×720。
+
+## 2026-10-26 13:40 — 发布 hlh.25，补 B-65
+
+`tools/bump-version.sh` 把版本从 `0.9.0-hlh.24+90024` 升到 `0.9.0-hlh.25+90025`，
+两个产物都从最终代码重建：
+
+- APK：58,652,112 B / `f2cfa15e…`，versionCode 90025，`apksigner` v1+v2+v3 通过；
+  已发布到 `/var/www/pvzge-res/apk/`，`apk/manifest.json` latest 指向 hlh.25。
+- Windows x64：190,024,416 B / `ca9e0e82…`，在 Windows 主机用
+  `tools/build-windows.ps1` 重建；已发布到 `/var/www/pvzge-res/win/`。
+- GitHub 私有仓 Release `v0.9.0-hlh.25`，四个资产（APK、APK sha256、zip、
+  zip sha256）上传成功。
+
+B-65 关闭：iOS `GameHostController` 与 OHOS `GamePage` 现在读取
+`appRoot/__local_save_guard.js` 并追加到 document-start；`localSaveGuardRequired`
+两端与 Dart/Android 同口径（旧 JSON 默认 false），required 时缺失/空白/读取失败
+阻止启动。`check_game_host_contract` 新增 11 条源码契约（83→94）。本机无
+Xcode/OHOS SDK 与设备，两端未编译、未实机，残余风险已写进 backlog。
+
+客户端复跑：`flutter analyze` 无告警；local-server 42、storage 63、desktop-zip 11、
+game-host-contract 94、update 32、guard 65、cloud 离线 9（在线 25 用临时账号跑过）、
+Android JVM 10 类 / 46 tests / 0 failures。总基线 **1061**（服务端 745 本轮未改，
+沿用 12:36/13:05 实跑；客户端 316）。
+
+真实 authentik 登录态 Web E2E：顶层 `lock=granted`、`host=true`、iframe 存在；
+子 frame `canvas=true`；第二个标签页 `lock=blocked`、无 iframe、无 `/load`，
+日志 `second game tab blocked (busy)`。临时账号 `zz-e2e-20261025` 已删除，
+临时云存档移入 `/home/hlh/pvzge-backups/zz-e2e-20261025-20261026-125912`，
+5 个临时令牌与锁文件已清理。
+
+仍未完成：B-33 Android 真机首屏/退出；B-64 完整一局人工验收；
+真实 `akadmin` 冲突选择。
+
+## 2026-10-26 13:42 — 统一 Web/App 游戏内存档面板的「上传本机」
+
+用户反馈手机端游戏里的存档面板没有「上传本机存档」，怀疑 Web/App 是两套存档。
+实际是同一份服务端数据、同一份 `admin.html` 生成物；差异只在 App 面板 iframe 是
+服务器 origin，读不到本地资源包 origin 的 localStorage，所以按钮被
+`if(window.__PVZGE_APP__)` 隐藏。
+
+改法：按钮上移到游戏页自己的面板标题栏（`ui.js`），点击调用
+`window.__pvzManualUpload()`（`sync.js`）。上传走现有 `send(payload, true)` 合并
+通道——`baseVer`/`baseMtime`、冲突检测、玩家回填、基准推进都在；**不是**
+`forceUploadLocal()`，不会把云端有、本机没有的玩家当删除。结果用
+`pvz-save-manual-upload-done/failed` 只回传一次；iframe 内嵌时隐藏重复按钮，
+直接打开 `/_save/admin.html` 仍保留原按钮。
+
+验证（真跑）：`node --check` 通过；`test-sync-offline` Web **441/0**、App 生成物
+**443/0**；`test-admin-baseline` **21/0**。`deploy-static.sh` 已部署，
+`--check` **9/9**；部署后 `test-cloud-saves.sh` **117/0/0**。`server.py` 未改、
+未重启。手机端不需要重新装 APK：`app-sync.js`/`app-ui.js` 每次启动游戏时从服务器
+拉取。
+
+残余：25 秒后返回的上传结果不会再弹提示（后台仍会推进队列/基准，刷新面板可见）；
+B-33/B-64 与 iOS/OHOS 实机验证仍未做。
+
+## 2026-10-26 15:23 — Web 登录后黑屏热修：撤掉游戏 iframe，改回顶层文档 + pass 交接
+
+现象：线上 Web 登录后整页全黑，游戏进不去。手机/PC 都一样。
+
+定位（真实 Chromium 156，非 localhost 域名，注入脚本与生产同一份）：第十轮把游戏装进
+同源 iframe，父文档在 `</head>` 就 `window.stop()`，`document.body` 从未生成，整棵文档树
+**rAF 一次都不触发**（2 秒 0 次回调）；iframe 里 cocos 资源全部 200 加载完，但
+`cc.game.isPaused()===true`、`director.getTotalFrames()===0`、`getScene()===null`。
+同一份页面在顶层文档直接跑是 `frames=412 / mainScene`。线上 14:43 日志也吻合：游戏资源
+全部 200 之后没有任何后续请求。**不是**账号、存档或资源问题；单测（jsdom）也测不出来。
+
+改法：删掉 iframe 宿主，改为写者资格传递（pass）——公网 Web 无 pass 的顶层只做一次极短
+交接（`ifAvailable` 拿 `pvzge-game-writer` → `sessionStorage` 写一次性 pass →
+`window.stop()` → `location.replace(location.href)`，锁持有到卸载）；带 pass 的顶层消费
+pass 后走原顶层 boot（与 App/桌面同一条路径）。锁被占时渲染全屏提示且**不 stop**，并提前
+吞掉 4 个存档键的 `setItem/removeItem`；pass 页在 `armWriterGate` 拿不到锁时
+250ms×8 重试，躲开旧文档卸载与锁释放的竞态。
+
+验证（真跑）：`test-sync-offline` Web **473/0**、App 生成物 **475/0**、
+`test-admin-baseline` **21/0**、`deploy-static --check` **9/9**、部署后
+`test-cloud-saves` **117/0/0**。真实浏览器：修复后 `iframes=0`、`frames=463`、
+`scene=mainScene`、`writerLock=granted`；第二标签页提示层 1100×673 可见、不 boot、
+存档键写入被吞。静态已部署；`server.py` 未改、未重启，nginx 未改。
+
+残余：真实账号完整一局（音频/全屏/触控/退出/云上传）仍需人工；公网 Web 首次进入多一次
+导航（交接页）；旧标签页必须硬刷新才会拿到新 `sync.js`。
+
+## 2026-10-27 — Windows 启动必崩（MissingPluginException）修复与 hlh.26
+
+用户装了 Windows 包，一启动就弹「应用初始化失败」。日志：
+
+```
+MissingPluginException(No implementation found for method incomingZip on channel
+io.github.dey410.gardendlessloader/resource_zip_importer)
+  at app_controller.dart:1258  (_resourcePickerService.incomingZipName())
+```
+
+根因：`resource_zip_importer`、`shortcuts`、`external_browser` 三个平台通道只在
+Android/iOS/鸿蒙实现，`windows/runner` 里一个平台通道都没有。桌面端 `invokeMethod`
+必抛 MissingPluginException，而这三行正好在 `initializeCore()` 末尾，被
+`initialize()` 的兜底 catch 接住 → 整页初始化失败。该机 `slot-a`/`slot-b` 空、
+`downloads` 里只有一个没有 EOCD 的 14 MB 半包，说明这台 Windows 从来没成功
+初始化过（这个坑从 10-18 加入通道的那次提交就存在）。
+
+改法：
+- `ResourcePickerService.incomingZipName/discardIncomingZip`：非移动端直接返回
+  null / 空操作；通道缺失按「没有待处理 ZIP」处理。
+- `ShortcutService.take/publish`：桌面端直接返回，缺失通道忽略。
+- 新增 `ExternalUrlService`：Windows `cmd /c start`、macOS `open`、Linux
+  `xdg-open`、移动端走 `external_browser` 通道；`openTokenIssuePage` 与 UI 的
+  公告/更新链接都改走它，顺带修掉 Windows「点链接没反应」。
+
+验证：`flutter analyze` 无告警；新增 `tool/check_desktop_channels.dart` **21/0**；
+既有客户端套件不变（game-host-contract 94、local-server 42、storage-migration 63、
+update-manifest 32、cloud-saves 9、local-save-guard 65）。基线 1123→**1144**
+（服务端 807 + 客户端 337）。
+
+## 2026-10-27 04:30 — 发布 0.9.0-hlh.26（Windows 启动崩溃修复）
+
+- APK `0.9.0-hlh.26`：58,652,110 B，sha256 `ac761fe7…fb40b2`，v1/v2/v3 全签。
+- Windows x64 zip：190,021,420 B，sha256 `4c0774d6…252a26`，`unzip -t` 无错。
+- 两个分发清单 `latest` 均为 `0.9.0-hlh.26 (90026)`；GitHub Release
+  `v0.9.0-hlh.26` 四个资产，digest 与本地一致。
+- 测试基线 1123 → **1144**（服务端 807 + 客户端 337，新增 desktop-channels 21）。
+- 代码仍未提交/推送（与 hlh.25 相同处理）。
+
+## 2026-10-27 — Windows 更新结果回执 + 下载目录默认位置（待发 hlh.27）
+
+用户实测反馈两点：①点「退出并自动更新」后应用直接消失，没有进度也没有结果提示，
+无法判断是否更新成功；②下载目录跟着资源根走，资源根被设成 `...\downloads` 时会出现
+`...\downloads\downloads\`。
+
+更新回执（B-67）：
+- 脚本新增 `-Result <json> -FromVersion -ToVersion`，**每条**退出路径写
+  `{status: applied|rolled-back|failed, code, message, fromVersion, toVersion, logFile, at}`，
+  失败路径一律重新拉起加载器（原来 exit 2/3/5 会把用户晾在空桌面）。
+- Dart 退出前写 `windows_update_result.json`（pending），启动时
+  `_consumeWindowsUpdateResult()` 读一次、删除、转成提示：
+  `applied` → 「已更新到 X」；`rolled-back`/`failed`/`pending` → 带下一步动作的失败提示；
+  同时写 `windows_update_result_consumed` 日志（含 logFile）。
+- 退出前把 installing 状态刷出去并延迟 900 ms，设置页可见「正在退出并安装更新…」。
+
+下载目录（B-68）：
+- 桌面端默认 `<exe 目录>\downloads`（创建后真写探测，不可写退回资源根）；移动端不变。
+- 更新脚本的备份与回滚 robocopy 增加 `/XD "<install>\downloads"`：否则上 GB 的资源包
+  会被整份备份，回滚的 `/MIR` 还会把它删掉。
+
+验证（本机，真跑）：`flutter analyze` 无告警；`check_update_manifest` **42/0**（32→42）、
+`check_desktop_channels` 21/0、`check_game_host_contract` 94/0、`check_local_server` 42/0、
+`check_storage_migration` 63/0、`check_cloud_saves` 9/0、`check_local_save_guard` 65/0。
+基线 1144→**1154**（客户端 337→347）。
+
+未做：Windows 机器已关机，hlh.27 的构建、实机三路径（成功/失败/回滚）验证、发版都待机器回来后执行。
+
+## 2026-10-27 — 更新链路 Debug：手动审计出 9 处失败路径缺陷
+
+Windows 关机，改用静态审计 + 本机可执行断言把「更新 → 重启 → 提示」这条链路的
+失败分支逐个走了一遍，修掉：
+
+1. **未预料的异常没有回执**：杀软拦截、句柄占用、属性访问被拒都会让脚本直接中止，
+   而应用早已退出 → 用户面前空桌面、pending 回执永远留着。→ 全脚本包一层
+   `try/catch`，写 `failed/unexpected` 回执并重启，`exit 6`。
+2. **杀残留进程会打断脚本**：`Get-Process | Where-Object { $_.Path ... }` 对受保护进程
+   读 `.Path` 抛 Access denied，配合 `$ErrorActionPreference='Stop'` 直接终止。→ 该段
+   整体降级 `SilentlyContinue`，结束后恢复。
+3. **robocopy 缺失/被拦**：`Start-Process robocopy` 抛错同样中止。→ `Invoke-Robocopy`
+   包 try/catch，返回 16（按失败处理，走备份失败分支）。
+4. **写日志失败会打断更新**：`Say` 里的 `Add-Content` 在临时目录不可写时抛错。→ try/catch。
+5. **重启无重试**：刚复制完/回滚完，exe 可能还被上一次进程占着。→ 5 次、每次间隔 1 秒。
+6. **`New-Object System.Text.UTF8Encoding($false)`** 依赖位置参数绑定，PS 5.1 上不直观。→ `::new($false)`。
+7. **`Expand-Archive` 太慢**：400 MB+ 解压要几分钟且全程无输出，用户以为卡死。→
+   `[System.IO.Compression.ZipFile]::ExtractToDirectory`（目标目录不预创建）。
+8. **code 不一致**：日志/提示用 `status.name` 生成 `windows_update_rolledBack`，而
+   `userErrorCatalog` 里是 `windows_update_rolled_back` → 回滚提示里查不到「下一步」。
+   → `WindowsUpdateOutcomeStatus.logCode` 统一，并加断言。
+9. **pending 回执没撤**：`Process.start` 失败时 pending 已写、脚本没跑 → 下次启动误报
+   「更新被中断」。→ catch 里删除回执。
+
+可执行断言：
+- 新增 `tool/check_windows_update_result.dart` **38 项**（四态解析、坏 JSON/数组/缺 status
+  返回 null、BOM 容错、大小写不敏感、数字字段转文本、多余字段忽略、logCode 与 catalog 对账）。
+- `check_update_manifest` 32→**49**（补：兜底 catch、受保护进程降级、robocopy 兜底、
+  日志容错、重启重试、ZipFile、pending 撤销）。
+- 其余不变：desktop-channels 21、game-host-contract 94、local-server 42、storage-migration 63、
+  cloud-saves 9、local-save-guard 65。客户端基线 337→**392**，总 **1199**。
+
+另外记录一条待验证项 **B-69**：Windows 打开链接用的 `cmd /c start` 对含 `&` 的 URL
+会被 cmd 当命令分隔符（既不完整也不安全），等 Windows 回来实测后再决定改 `rundll32`
+或自己做转义——不在无实机的状态下盲改。
+
+## 2026-10-27 — hlh.27 发布：更新可见化 + 四类实机缺陷
+
+Windows 主机回来后，先做「更新脚本实机验证」，再发版。发的是 hlh.27：
+APK 58,652,116 B / `c044ffcb…`，Windows zip 190,028,036 B / `28b6f655…`，
+两份服务端清单 latest 均为 0.9.0-hlh.27（90027），GitHub Release `v0.9.0-hlh.27`。
+
+Windows 实机验证（`tools/test-windows-updater.ps1`，**52/0**）覆盖七条路径 +
+正式发布包。验证过程中查出四个本机静态审计发现不了的问题：
+
+1. **robocopy 永久挂住**（最严重）：默认「重试 100 万次 × 等 30 秒」。目标文件
+   被占用（CEF 没退干净、杀软扫描）时脚本不报错、不超时、永远不结束，用户看到
+   的就是「应用没重启、也没任何提示」——正是这次要修的症状的另一个成因。
+   已改为 `/R:2 /W:1`，两次失败即回滚。
+2. **备份失败留半成品**：`/MIR` 备份中途失败会留下几百 MB 的 `<安装>.backup`，
+   安装目录其实没动过。现在删掉。
+3. **回滚成功后备份不删**：同样几百 MB 垃圾。现在删；而**回滚失败时必须保留**
+   （那是用户唯一完整的旧版本），提示里直接给出备份路径。
+4. **`cmd /c start` 截断 URL（B-69）**：起本地 HTTP 服务器抓请求，
+   `http://127.0.0.1:<port>/game?uid=42&profile=slots-1&ver=hlh.26` 经
+   `cmd /c start` 只有 `/game?uid=42` 到达；`&` 之后被 cmd 当成独立命令执行。
+   改为 `rundll32 url.dll,FileProtocolHandler`，兜底 PowerShell
+   `Start-Process -FilePath '<url>'`；两条路径实测都送出完整 URL。
+
+另外确认两件与「能否更新成功」直接相关的事：
+- `Expand-Archive` 解正式包要几分钟且全程无输出（用户以为卡死）；换成 .NET
+  `ZipFile::ExtractToDirectory` 后同一份包 **8.7 秒**。
+- Compress-Archive 生成的 zip 条目用反斜杠分隔，.NET 的 `ExtractToDirectory`
+  能正确吃下（正式包实测解出 `data\flutter_assets`、`libcef.dll`）。
+
+新增工具：
+- `tool/print_windows_updater.dart`：把更新脚本按运行时同款编码（BOM+CRLF）导到磁盘。
+- `tool/check_windows_update_result.dart`：回执 JSON → 四态纯映射，**38** 项。
+- `tools/test-windows-updater.ps1`：Windows 实机更新路径，**52** 项。
+- `tools/smoke-windows-build.ps1`：发布包解压后启动冒烟，**6** 项（hlh.26 的
+  启动崩溃只有跑起来才能发现）。
+
+`handoff.sh verify` 的 PowerShell 编码检查从「只查 build-windows.ps1」改成
+遍历 `tools/*.ps1`——新增的两个脚本都要求 BOM+CRLF。
+
+改动后：`flutter analyze` 无告警；客户端套件
+update-manifest 53、windows-update-result 38、desktop-channels 23、
+game-host-contract 94、storage-migration 63、local-server 42、
+local-save-guard 65、cloud-saves 9（离线）全绿。基线 1199 → **1205**
+（服务端 807 + 客户端 398）。`verify` 25/0。
+
+未做：用户实机走一遍「设置 → 检查更新 → 下载 → 退出并更新 → 重启看提示」；
+B-33（Android 本地资源首屏）仍需真机；iOS/OHOS 未编译；两仓改动仍未提交。
+
+本轮服务端未改代码，但为对齐基线仍复跑了四套：`test-sync-offline` 473、
+`test-save-versions` 159、`test-concurrency` 28、`test-admin-baseline` 21，
+外加对已部署实例的 `test-cloud-saves` 117，全部 0 失败（合计 798）。
+`test-sync-live` 9 项需要临时实例（`DATA_DIR`+非默认端口启动 server.py），
+本次环境不允许起后台服务，沿用 hlh.26 期实机结果，未复跑。
+
+### 2026-10-27 用户机器从 hlh.25 升到 hlh.27（SSH 原位替换，未点界面）
+
+用户的加载器装在 `D:\Program Files\gardendless-loader`（快捷方式指向它），版本
+`0.9.0-hlh.25+90025`；资源根设成 `<安装目录>\downloads`，里面还有一层旧的
+`downloads`（就是 B-68 的 `downloads\downloads`），7 个文件 699 MB。
+
+考虑到旧版本内置更新用的是修复前的脚本（无回执、失败不重拉、robocopy 无重试上限），
+这次没有让用户点界面，而是用新增的 `tools/upgrade-windows-install.ps1` 在前台做：
+暂存解压 → `/MIR` 备份（`/XD downloads`）→ `/E` 覆盖 → 版本与 downloads 校验 →
+12 秒启动冒烟。**10/10 通过**：
+
+- exe `0.9.0-hlh.25+90025` → `0.9.0-hlh.27+90027`
+- downloads 7 个文件 / 699 MB 前后一致
+- 启动后 12 秒仍在运行，事件日志无崩溃记录
+- 备份 `D:\Program Files\gardendless-loader.backup`（430 MB，不含 downloads）——
+  用户确认新版本可用后已于同日删除，释放 429.8 MB；安装目录与 downloads 均完好
+
+顺带确认：hlh.27 的默认下载目录 `<exe 目录>\downloads` 正好等于该用户现有的资源根，
+位置不变，不需要迁移。
+
+残余：用户还没走过一次**新**更新流程（检查 → 下载 → 退出并安装 → 重启看到结果提示），
+这条链路要等下一版发布时才能实际触发；`tools/upgrade-windows-install.ps1` 的自动化
+用例也还没单独补（目前靠这次实机执行当证据）。
+
+## 2026-10-27 — hlh.28：Windows 全屏（游戏内全屏开关终于生效）
+
+用户反馈：Windows 端没有全屏，游戏设置里选「全屏」没有任何变化。
+
+查下来是三层原因叠加，缺一层都不成立：
+
+1. 游戏把宿主当 Electron：资源包里的 `tmppatch.js` 自造 `window.electron`，
+   设置里的全屏最终调 `document.documentElement.requestFullscreen()`。
+2. 桌面加载器是 **CEF 离屏渲染**（画面贴成 Flutter 纹理）。离屏模式下 HTML5 全屏
+   不会改变窗口；插件源码里 `grep -i fullscreen` 0 命中，没有全屏回调可接。
+3. `windows/runner` 一直是 Flutter 模板，启动器自身没有任何窗口级全屏能力。
+
+修法（宿主侧做全屏，页面侧只负责转发）：
+- 原生窗口通道 `io.github.dey410.gardendlessloader/window`：`setFullscreen` 记下
+  `GWL_STYLE/GWL_EXSTYLE/WINDOWPLACEMENT` → `WS_POPUP` + `MonitorFromWindow
+  (MONITOR_DEFAULTTONEAREST).rcMonitor` → 退出时 `SetWindowPlacement` 精确还原。
+- F11 在 `MessageHandler` 里**先于** Flutter/CEF 拦下（否则按键被页面吃掉），
+  状态用 `InvokeMethod("onFullscreenChanged")` 推回 Dart。
+- 注入脚本把 `requestFullscreen`/`exitFullscreen`/`webkit*` 转给
+  `window.gardendlessDesktop`（Dart JS 通道），并伪造 `document.fullscreenElement`
+  ——不伪造的话游戏用 `electron.isFullscreen()` 判断会永远「不是全屏」，第二次点
+  还是进入。宿主改状态时用 `__gardendlessFullscreen.apply` 回灌。
+- 游戏页：每次 `onLoadEnd` 重装桥（reload 会清掉 JS 通道）、工具栏加全屏按钮、
+  离开页面强制退出全屏。
+
+验证：
+- `check_desktop_channels` 23→**38**；新增 `check_fullscreen_script` **23**（Node 假 DOM
+  跑「进入/退出/再进入」、F11 回灌、无通道不假装成功、重复注入、webkit 前缀）。
+- 新增 `tools/test-windows-fullscreen.ps1` **13**：给真实窗口 `PostMessage(WM_KEYDOWN,
+  VK_F11)`，实测 `style 0x4CF0000 → 0x96000000`(WS_POPUP)、`rect 10,10 1044x720 →
+  0,0 1024x768`（显示器矩形），退出后逐字节还原，连续切换 3 次不漂移。**用发布包跑的**。
+- 顺带确认：ssh 会话里 GUI 进程的窗口永远「不可见」（`Process.MainWindowHandle` 恒为 0，
+  已发布版同样如此），所以测试改成按 PID + 窗口类名 `EnumWindows` 枚举隐藏窗口——
+  样式与矩形仍然是真实的，验证照样成立。
+
+发布：APK 58,652,221 B / `89a58a0b…`，Windows 190,082,846 B / `e419aca1…`，
+两份清单 latest=0.9.0-hlh.28，Release `v0.9.0-hlh.28`。基线 1205 → **1243**。
+
+遗留：游戏内点全屏（JS→Dart）这一段无法自动化，需用户点一次；多显示器/DPI 未覆盖。
+另外构建期间踩到一次并发构建把 `dist` 里的 zip 写坏（同一文件被两个 build 同时写），
+重跑后 `unzip -t` 通过——以后 Windows 构建不要并发跑。
+
+## 2026-10-27 — hlh.29：自动更新真的会装了，而且看得见进度（B-71）
+
+用户点「退出并自动更新」后：启动器立刻消失，没有进度窗口，没有重启，
+日志页什么都没有，重启后还是 hlh.27。
+
+先查真机状态，再查代码，最后用对照实验定位。事实链：
+
+1. `D:\Program Files\gardendless-loader\gardendless_loader.exe` 仍是 hlh.27
+   （11:39 那份，没被覆盖），`<资源根>/windows_update_result.json` 只有一份
+   `pending`，`%TEMP%` 里**没有任何这次运行的 `gardendless-update-*.log`**
+   → 更新脚本根本没有启动过。
+2. 事件日志 13:42:49 有一条 `Application Error 1000`：`gardendless_loader.exe`
+   `0xc0000409` / `ucrtbase.dll`，时间正好在 900 ms 延迟后的 `exit(0)`。
+3. 对照实验（把 app 的启动代码抄成一个独立 dart 程序，跑在同一台机器、
+   同一个带空格的路径上）：
+   - `ProcessStartMode.detached` → 打印出 pid，但探针脚本**一行都没执行**、
+     连日志都没创建（带空格与不带空格都一样）；
+   - `ProcessStartMode.normal` → 参数完整送达，脚本正常执行；父进程
+     `exit(0)` 消失 6 秒后，子进程仍然写出了文件。
+
+结论：两条独立缺陷叠加。detached 在 Windows 上是空转（所以脚本从未跑），
+`exit(0)` 又让进程 fail-fast 崩溃（所以用户看到「崩了」而不是「安静退出」）。
+
+修法见 `07-backlog.md` B-71。要点：
+- 普通模式启动 + 关 stdin + 读掉 stdout/stderr；参数拼装收进
+  `WindowsUpdaterScript.start()`（应用与实机测试共用同一份）。
+- 退出前 700 ms 存活校验：秒退就取消更新并显示错误，不再静默消失。
+- 退出改走窗口通道 `quit`（原生 `PostMessage(WM_CLOSE)`），6 秒兜底。
+- 更新脚本自带「正在更新」WinForms 进度窗口，等待期间泵消息；UI 失败只降级。
+- 顺手修：`openWindowsUpdateFolder` 也用了 detached；`Invoke-Robocopy` 用
+  `Start-Process -PassThru`（PS 5.1 不带 `-Wait` 时 `ExitCode` 恒为 `$null`，
+  于是失败被当成成功、回滚分支永远不触发——测试用例 4/5 当时整段失效，
+  这次自查时才发现，已改成 .NET `Process` 取真实退出码）。
+
+真机验证（都用发布包）：
+- `test-windows-updater.ps1 -RealZip` **63/0**：真实包 8.7 秒装完；
+  第 9 例用 `dart run tools/windows_update_spawn_check.dart` 调生产代码启动，
+  父进程 900 ms 后退出，脚本自己跑完 6.1 秒 → `applied`，并断言日志里没有
+  `progress ui unavailable`（窗口真的建起来了）。
+- 新增 `test-windows-quit.ps1` **5/0**：`WM_CLOSE` 后 15 秒内退出、退出码 0、
+  **没有崩溃事件**、没有残留进程。
+- `test-windows-fullscreen.ps1` **13/0** 回归。
+
+一个误导性线索也记在这里：排查时看到两个 11:07 起常驻的 `CefViewWing` 进程，
+一度当成崩溃留下的孤儿；实际是 **MuMu 模拟器** 的进程。本项目的 CEF 辅助进程
+与主进程同名（`gardendless_loader.exe --type=...`），按进程名断言即可。
+
+发布：APK 58,652,216 B / `f5d474b0…`，Windows 190,085,999 B / `6ec6235a…`，
+两份清单 latest=0.9.0-hlh.29，Release `v0.9.0-hlh.29`。基线 1243 → **1259**。
+
+用户安装（hlh.27 的更新器就是坏的，救不了自己）：用
+`tools/upgrade-windows-install.ps1` 就地替换到 hlh.29，10/0；`downloads`
+8253 个文件 / 2207.1 MB 前后一致；12 秒冒烟无崩溃事件；顺手删掉上次失败留下的
+hlh.28 zip（181 MB）与 `apply-windows-update.ps1`。旧版本备份 440 MB 暂留。

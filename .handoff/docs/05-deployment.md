@@ -103,3 +103,21 @@ bash tools/publish-windows.sh <zip> --version 0.9.0-hlh.N --notes "…"
 
 存档目录定期打包：`/home/hlh/pvzge-backups/saves-<stamp>.tar.gz`。
 **动 `saves/` 结构前先备份。**
+
+## 9. 回滚边界：服务端与静态必须匹配
+
+从多玩家版本（`profiles.json` + `profiles/<uuid>.json`）回退到旧的整包写入器时，
+**不能只回退代码**：旧写入器只更新兼容镜像 `PvZ2_PlayerProperties.json`，而新
+服务端只要发现 manifest 存在就优先读 `profiles/`，回滚期间写进镜像的新进度
+会在重新升级后被忽略。
+
+发布回执必须记录**成对的服务端 commit / 静态文件版本**，回滚时按下面二选一：
+
+1. **推荐**：同时回退静态（或先停写），并把 `saves/` 恢复到上一个 manifest
+   版本之前的备份，再启动旧服务端；重新升级后从备份/导出核对进度。
+2. **只回退服务端**：先停 `pvzge-save`，把当前 `profiles.json` + `profiles/`
+   导出成一份整包快照，删除/移走 manifest 与 profiles 目录，再启动旧服务端；
+   此后的写入只进镜像。重新升级前把镜像按 manifest 重建，核对无误后再切回。
+
+禁止在存在 manifest 的数据目录上直接混跑旧整包写入器。详见 `docs/07-backlog.md`
+的 B-39。

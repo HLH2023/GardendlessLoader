@@ -16,7 +16,7 @@ Flutter 启动器（状态/资源/存档/设置） → 原生游戏宿主（Andr
 | `services/resource_picker_service.dart` | 平台分流：Android 走原生 MethodChannel，Windows/Linux/macOS 走 Dart 解压 |
 | `services/local_resource_server.dart` | 桌面端本地 HTTP 服务器：服务资源目录 / 反代上游 / 注入桥脚本 / Range+MIME / 路径与符号链接防护 |
 | `services/storage_migration.dart` | 改存储位置：条目搬迁、跨盘 copy+校验+删、回滚、**迁移日志 + 启动自愈 + 空间预检** |
-| `services/app_settings_store.dart` | 设置与 `PlayMode { local, online }`，设备令牌也在这里（文件 0600） |
+| `services/app_settings_store.dart` | 设置（本地资源包固定形态；旧 `playMode` 字段仅兼容读取、不再写出），设备令牌也在这里（文件 0600） |
 | `services/cloud_save_service.dart` / `remote_resource_service.dart` | 云存档 / 远端资源清单的 HTTP 客户端（Bearer） |
 | `ui/pages/desktop_game_page.dart` | Windows CEF 游戏窗口，退出用 try/finally 保证停服 |
 | `ui/pages/storage_location_card.dart` | 存储位置 UI（Android 用候选目录，避开 SAF `content://`） |
@@ -25,7 +25,7 @@ Flutter 启动器（状态/资源/存档/设置） → 原生游戏宿主（Andr
 Android 原生：`android/app/src/main/kotlin/io/github/dey410/gardendlessloader/game/`
 - `GameActivity.kt` — WebView 宿主、手势、导出、退出
 - `GameSessionCodec.kt` — 会话参数编解码（含 `mode=local|online`）
-- `OnlineGameResourceClient.kt` — 在线形态带 Bearer 代理子资源 + 注入存档桥
+- `GameWebViewClient.kt` / `GameResourceResolver.kt` — 本地资源包读取、document-start 注入与请求白名单（在线代理已于 2026-10-26 删除）
 - `OnlineSessionHeartbeat.kt` — **原生 60 s 心跳**（Dart 定时器活不过引擎销毁）
 
 ## 3. 两种游玩形态
@@ -57,6 +57,9 @@ Windows 默认 local（用户明确要求「下载资源」而非在线）。
 - **并发**：`fcntl.flock` + 纳秒版本号乐观并发（`baseVer`），冲突返回 `stale_base`。
 - **空档保护**：不允许用空存档覆盖非空存档。
 - `sync.js` 的并发基准（`__pvzCloudVer`）**绑定游戏版本**，切版本后旧基准作废。
+- **Web 单写者**：顶层 `sync.js` 先拿 `pvzge-game-writer` Web Lock，grant 后才创建
+  同源 iframe 承载游戏；第二个标签页在同步 boot 之前就被阻断。App/桌面本地回环
+  是单实例，仍走原同步 boot。
 
 ## 5. 资源包（本地形态）
 

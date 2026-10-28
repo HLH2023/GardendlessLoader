@@ -69,6 +69,13 @@ ssh win "powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\s2681\Gard
 ### 3.4 CEF 说明
 
 Windows 端 WebView 用 `webview_cef 0.6.2`（自带 Chromium，不依赖用户 Edge 版本）。
+CEF 会在 exe 目录（或工作目录）写 `debug.log`，且没有上限：界面起不来、Chromium
+在后台反复报同一个错时会持续追加，2026-10-25 实机出现过 250 GB 把磁盘写满。
+`windows/runner/cef_log_limit.cc` 在浏览器进程里每 15 秒检查一次，超过 32 MB 就清空
+（CEF 以共享写方式持有日志，实机验证运行中裁剪成功、文件从 0 重新增长；断言在
+`tool/check_update_manifest.dart`）。根治要给插件做受控 fork 设置
+`log-severity=disable`，见 `07-backlog.md` 的 B-29。
+
 `webview_flutter_windows 1.3.0` 要求 Dart ≥3.12、`webview_windows 0.4.0` 锁 sdk <3.0，都不适配当前 Flutter。
 所以包体大（`libcef.dll` 占 270 MB）是正常的。
 
@@ -84,11 +91,36 @@ gh workflow run build-windows.yml --repo HLH2023/gardendless-app --ref main
 
 ## 5. 本机验收脚本（不需要设备）
 
+条数以 `.handoff/state.json` 的 `tests.suites` 为准（这里是当前值，漂了就改这里）：
+
 ```bash
-dart run tool/check_local_server.dart          # 43 项：本地服务器
-dart run tool/check_storage_migration.dart     # 62 项：存储迁移 + 日志自愈 + 空间预检 + 事务门禁
+dart run tool/check_local_server.dart          # 42 项：本地服务器
+dart run tool/check_storage_migration.dart     # 63 项：存储迁移 + 日志自愈 + 空间预检 + 事务门禁
 dart run tool/check_desktop_zip.dart <zip>     # 11 项：流式解压 + zip-slip
-dart run tool/check_game_host_contract.dart    # 34 项：原生退出原因契约 + 会话令牌 + 凭据文件
-dart run tool/check_update_manifest.dart       # 22 项：Windows 更新清单 + 更新脚本编码
+dart run tool/check_game_host_contract.dart    # 94 项：原生退出原因契约 + 会话令牌 + 凭据文件
+dart run tool/check_update_manifest.dart       # 54 项：Windows 更新清单 + 更新脚本 + 启动链路
+dart run tool/check_windows_update_result.dart # 38 项：更新回执解析（纯函数）
+dart run tool/check_desktop_channels.dart      # 53 项：桌面平台通道 + 全屏 + 更新启动链路
+node  tool/check_local_save_guard.mjs          # 65 项：JS 版本保护
+node  tool/check_fullscreen_script.mjs         # 23 项：全屏注入脚本状态机
 dart run tool/stress_real_pack.dart <big.zip> <targetDir>   # 真实 1.3 GB 包：内存/计数
 ```
+
+Windows 实机才能跑的（见 `06-testing.md`，不计入基线）：`tools/test-windows-updater.ps1`
+（63 项，`-RealZip <zip>` 用发布包跑）、`tools/test-windows-fullscreen.ps1`（13 项）、
+`tools/test-windows-quit.ps1`（5 项）、`tools/smoke-windows-build.ps1`（6 项）。
+
+## 6. Windows 实机测试的三个坑（踩过，别重复）
+
+1. **不要并发跑两个 Windows 构建**：两个 `flutter build windows` 同时写
+   `dist\*.zip` 会得到被占用/截断的包（2026-10-27 实测：`Get-FileHash` 读失败、
+   `unzip -t` 报错）。一次只跑一个，跑完再开始下一个。
+2. **不要整目录同步 `windows/`**：Linux 侧 `windows/flutter/ephemeral` 是软链接，
+   同步过去后 Windows 上的插件软链接全部失效，CMake 直接报
+   `add_subdirectory given source ... which is not an existing directory`。
+   只同步 `windows/runner`；万一中了，删掉 `windows/flutter/ephemeral` 后重新 `flutter pub get`。
+3. **ssh 会话里 GUI 进程的窗口永远「不可见」**：`Process.MainWindowHandle` 恒为 0，
+   已发布版本也一样，靠它等窗口会一直超时。改用 `EnumWindows` + `GetWindowThreadProcessId`
+   按 PID 找窗口（类名以 `FLUTTER` 开头），隐藏窗口的样式/矩形仍然真实可测——全屏与
+   干净退出两条用例都是这么做的。
+
