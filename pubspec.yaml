@@ -1,7 +1,7 @@
 name: gardendless_loader
 description: Local Flutter loader for user-supplied PvZ2 Gardendless web resources.
 publish_to: "none"
-version: 0.9.0-hlh.35+90035
+version: 0.9.0-hlh.36+90036
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -28,6 +28,13 @@ dependencies:
 
 dev_dependencies:
   flutter_lints: ^5.0.0
+
+dependency_overrides:
+  # 仅 Windows 用。vendor 一份的唯一原因：vsync 源要跟「窗口所在显示器」，
+  # 上游写死 EnumAdapters1(0)/EnumOutputs(0)，多屏/虚拟显示器/远程桌面下会
+  # 等错屏幕的 vblank。补丁见 packages/webview_cef/VENDORED.md。
+  webview_cef:
+    path: packages/webview_cef
 
 flutter:
   config:

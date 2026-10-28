@@ -57,6 +57,9 @@ Future<void> main() async {
   await File('${root.path}/main.js').writeAsString('console.log(1);');
   final wasmBytes = List<int>.generate(4096, (i) => i % 256);
   await File('${root.path}/assets/game.wasm').writeAsBytes(wasmBytes);
+  // Cocos 打包产物带内容哈希：文件名里的哈希不变则内容不变，可以 immutable。
+  await File('${root.path}/assets/_virtual_cc-937a2166.js')
+      .writeAsString('export const v = 1;');
   // 目录下放一个「秘密」文件，用来验证穿越防护
   await File('${temp.path}/secret.txt').writeAsString('TOP-SECRET');
 
@@ -149,7 +152,49 @@ Future<void> main() async {
     check('HEAD 200 且无 body', headResp.statusCode == 200 && headBody.isEmpty,
         '${headResp.statusCode}/${headBody.length}');
 
-    // 7) 路径穿越
+    // 7) 缓存策略：HTML 不能缓存（每次注入 nonce），带内容哈希的资源长期
+    //    缓存，其余 no-cache + ETag 重新验证。资源包 2 GB，重进游戏不必
+    //    每次都从磁盘重读。
+    final hashedResp = await req(
+        client, server.baseUri.resolve('assets/_virtual_cc-937a2166.js'));
+    await hashedResp.drain<void>();
+    check(
+      '带哈希的资源 immutable 长期缓存',
+      hashedResp.headers.value('cache-control') ==
+          'public, max-age=31536000, immutable',
+      hashedResp.headers.value('cache-control'),
+    );
+    final plainResp =
+        await req(client, server.baseUri.resolve('assets/game.wasm'));
+    await plainResp.drain<void>();
+    final plainEtag = plainResp.headers.value('etag');
+    check(
+      '普通资源 no-cache + ETag（可重新验证）',
+      plainResp.headers.value('cache-control') == 'no-cache' &&
+          plainEtag != null &&
+          plainEtag.isNotEmpty,
+      '${plainResp.headers.value('cache-control')} / $plainEtag',
+    );
+    final revalidated = await req(
+      client,
+      server.baseUri.resolve('assets/game.wasm'),
+      headers: {'if-none-match': plainEtag ?? ''},
+    );
+    final revalidatedBody =
+        await revalidated.fold<List<int>>(<int>[], (b, c) => b..addAll(c));
+    check(
+      'ETag 命中返回 304 且无 body',
+      revalidated.statusCode == 304 && revalidatedBody.isEmpty,
+      '${revalidated.statusCode}/${revalidatedBody.length}',
+    );
+    check(
+      '304 保留 ETag 与缓存策略',
+      revalidated.headers.value('etag') == plainEtag &&
+          revalidated.headers.value('cache-control') == 'no-cache',
+      revalidated.headers.value('etag'),
+    );
+
+    // 8) 路径穿越
     for (final evil in [
       '../secret.txt',
       '..%2Fsecret.txt',
@@ -162,12 +207,12 @@ Future<void> main() async {
           'HTTP ${evilResp.statusCode}');
     }
 
-    // 8) 不存在的文件
+    // 9) 不存在的文件
     final missing = await req(client, server.baseUri.resolve('nope.js'));
     await missing.drain<void>();
     check('404 正常返回', missing.statusCode == 404, missing.statusCode);
 
-    // 9) 服务器在异常请求后仍可用
+    // 10) 服务器在异常请求后仍可用
     final after = await req(client, server.baseUri.resolve('main.js'));
     await after.drain<void>();
     check('异常后服务器仍正常', after.statusCode == 200, after.statusCode);

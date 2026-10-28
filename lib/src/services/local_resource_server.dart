@@ -216,15 +216,33 @@ class LocalResourceServer {
       return response.close();
     }
 
-    // 非 HTML 支持 Range：游戏里有大体积音视频，断点/拖动都靠它
+    // 静态资源允许缓存：资源包 2 GB，每次进游戏都从磁盘重读一遍太浪费。
+    // 与 Android 的 GameResourceResolver 同一套策略：带内容哈希的文件名
+    // 永久缓存，其余 no-cache + ETag 重新验证（内容变了 ETag 就变，不会拿
+    // 旧资源）。HTML 仍然 no-store：每次请求都要重写注入内容，不能缓存。
+    final lastModified = await file.lastModified();
+    final etag = '"${lastModified.millisecondsSinceEpoch}-$length"';
+    final cacheControl = _cacheControlFor(relative);
     final range =
         _parseRange(request.headers.value(HttpHeaders.rangeHeader), length);
+    if (range == null &&
+        request.headers.value(HttpHeaders.ifNoneMatchHeader) == etag) {
+      response
+        ..statusCode = HttpStatus.notModified
+        ..headers.set(HttpHeaders.etagHeader, etag)
+        ..headers.set(HttpHeaders.cacheControlHeader, cacheControl);
+      return response.close();
+    }
+
+    // 非 HTML 支持 Range：游戏里有大体积音视频，断点/拖动都靠它
     if (range != null) {
       final (start, end) = range;
       response
         ..statusCode = HttpStatus.partialContent
         ..headers.contentType = contentType
         ..headers.set(HttpHeaders.acceptRangesHeader, 'bytes')
+        ..headers.set(HttpHeaders.etagHeader, etag)
+        ..headers.set(HttpHeaders.cacheControlHeader, cacheControl)
         ..headers.set(
           HttpHeaders.contentRangeHeader,
           'bytes $start-$end/$length',
@@ -239,11 +257,34 @@ class LocalResourceServer {
       ..statusCode = HttpStatus.ok
       ..headers.contentType = contentType
       ..headers.set(HttpHeaders.acceptRangesHeader, 'bytes')
+      ..headers.set(HttpHeaders.etagHeader, etag)
+      ..headers.set(HttpHeaders.cacheControlHeader, cacheControl)
       ..headers.contentLength = length;
     if (request.method == 'HEAD') return response.close();
     await response.addStream(file.openRead());
     return response.close();
   }
+
+  /// 与 Android 端 `GameResourceResolver.cacheControl` 对齐的缓存策略。
+  ///
+  /// 带内容哈希的文件名（Cocos 打包产物很常见，如 `_virtual_cc-937a2166.js`）
+  /// 永不变，可以 immutable；其余走 no-cache + ETag，重新验证但不用重传。
+  static String _cacheControlFor(String relative) {
+    final normalized = relative.replaceAll('\\', '/');
+    if (normalized == 'index.html' ||
+        normalized == 'src/settings.json' ||
+        normalized == 'src/import-map.json') {
+      return 'no-cache';
+    }
+    final name = normalized.split('/').last;
+    if (_contentHash.hasMatch(name)) {
+      return 'public, max-age=31536000, immutable';
+    }
+    return 'no-cache';
+  }
+
+  static final RegExp _contentHash =
+      RegExp(r'(?:^|[._-])[0-9a-f]{8,}(?:[._-]|$)', caseSensitive: false);
 
   /// 把相对路径解析到资源根目录内；越界返回 null。
   ///

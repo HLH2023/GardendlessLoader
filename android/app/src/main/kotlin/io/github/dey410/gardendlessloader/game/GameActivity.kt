@@ -517,12 +517,17 @@ class GameActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // 与 onPause 成对：把 WebView 从后台计时器节流/暂停里放回来。
+        if (::webView.isInitialized) webView.onResume()
         resumedAt = SystemClock.elapsedRealtime()
         logLifecycle("resumed")
     }
 
     override fun onPause() {
         super.onPause()
+        // 切后台（含系统暗屏）时暂停 WebView 的 JS 计时器与渲染：
+        // 不主动暂停的话游戏会继续跑主循环，白白耗电发热。
+        if (::webView.isInitialized) webView.onPause()
         if (resumedAt != 0L) playedMs += SystemClock.elapsedRealtime() - resumedAt
         resumedAt = 0L
         logLifecycle("paused")

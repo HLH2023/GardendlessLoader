@@ -365,6 +365,12 @@ void main() {
         .hasMatch(gamePage),
   );
   check(
+    '只在游戏主文档重装桥（广告/统计 iframe 不抢焦点、不重复注入）',
+    gamePage.contains('_isGameDocument(urlId)') &&
+        RegExp(r'bool _isGameDocument\(String url\)[\s\S]{0,400}?uri\.port == origin\.port')
+            .hasMatch(gamePage),
+  );
+  check(
     '工具栏有全屏按钮且状态跟真实窗口一致',
     gamePage.contains('enterFullscreen') &&
         gamePage.contains('exitFullscreen') &&

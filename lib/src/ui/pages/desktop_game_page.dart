@@ -72,6 +72,9 @@ class _DesktopGamePageState extends State<DesktopGamePage> {
         WebviewEventsListener(
           onLoadEnd: (_, urlId) {
             _bridgeLog('loadEnd $urlId');
+            // CEF 的 OnLoadEnd 对每个 frame 都触发，广告/统计 iframe 也会命中。
+            // 在那里重装桥、补焦纯属白做，还会在广告刷新时抢一次画布焦点。
+            if (!_isGameDocument(urlId)) return;
             if (!mounted) return;
             setState(() => _ready = true);
             // 全屏桥要在页面脚本之后、用户点「全屏」之前装好；重新加载会
@@ -105,6 +108,17 @@ class _DesktopGamePageState extends State<DesktopGamePage> {
       if (!mounted) return;
       setState(() => _error = '$error');
     }
+  }
+
+  /// 只认主文档：游戏页面永远是本地服务器的 origin。广告/统计 iframe、
+  /// 外部管理页不触发重装（每次重装都会重新执行脚本、补一次焦点）。
+  bool _isGameDocument(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return false;
+    final origin = widget.launch.uri;
+    return uri.scheme == origin.scheme &&
+        uri.host == origin.host &&
+        uri.port == origin.port;
   }
 
   /// 装桌面桥：JS 通道 + DOM 全屏 API 改写 + 键盘焦点引导。

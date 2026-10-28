@@ -3,6 +3,8 @@ include: package:flutter_lints/flutter.yaml
 analyzer:
   exclude:
     - build/**
+    # vendored 三方包（只改了 Windows 原生代码；Dart 侧保持上游原样）
+    - packages/webview_cef/**
 
 linter:
   rules:
