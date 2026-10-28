@@ -25,11 +25,14 @@ const kDefaultServerBase = String.fromEnvironment(
 const saveServerRequestTimeout = Duration(seconds: 20); // 服务器请求（清单、注入脚本）超时时间
 const saveLoginPagePath = '/_save/app.html'; // 令牌签发页；浏览器打开时是手动复制模式
 const saveLoginBridgeQuery = 'bridge=1'; // 应用内登录：页面通过 GardendlessBridge 回传令牌
-const saveAdminPagePath = '/_save/admin.html'; // 完整存档管理页（历史/回滚/设备），需浏览器 authentik 会话
+const saveAdminPagePath =
+    '/_save/admin.html'; // 完整存档管理页（历史/回滚/设备），需浏览器 authentik 会话
 const saveWhoamiPath = '/_save/app/whoami'; // 校验设备令牌，返回 {"user": "..."}
 const saveLoadPath = '/_save/app/load'; // 云端存档元信息（data/mtime/summary）
 const saveHistoryPath = '/_save/app/history'; // 某个存档键的历史版本（需管理员）
 const saveRestorePath = '/_save/app/restore'; // 回滚到指定历史版本
+const saveProfileHistoryPath = '/_save/app/profile/history'; // 单个玩家数据的历史版本
+const saveProfileRestorePath = '/_save/app/profile/restore'; // 只回滚一个玩家，不动其它玩家
 const saveApkManifestPath =
     '/_save/app/res/apk/manifest.json'; // 应用内更新的 APK 清单，带 Bearer 令牌请求
 const saveApkManifestMaxBytes = 64 * 1024; // APK 清单最大响应体，64KB
@@ -42,9 +45,12 @@ const saveServerScriptMaxBytes = 2 * 1024 * 1024; // 注入脚本最大响应体
 const saveServerSavesMaxBytes = 4 * 1024 * 1024; // 存档清单最大响应体（含 meta 摘要），4MB
 const saveServerHistoryLimit = 20; // 存档历史默认拉取条数
 const syncBridgeFileName = '__sync_app.js'; // 云存档注入脚本文件名（与资源槽同级）
-// 原生宿主专用凭据（0600，不注入页面）：心跳/在线代理必须用长期设备令牌，
-// 页面里的 token 只是短时会话令牌，过期后不能把原生链路一起带走
-const nativeTokenFileName = '__sync_native_token';
+// 本机存档版本保护脚本：与登录无关，必须在游戏读 localStorage 之前执行。
+// 由 Dart 生成、原生宿主读取，保证 Android 与桌面端跑的是同一份逻辑。
+const localSaveGuardFileName = '__local_save_guard.js';
+// 旧版在线宿主写下的长期设备令牌文件；在线游玩删除后无人读取，只在启动与
+// 登出时清理，避免明文令牌继续躺在用户可选的资源目录里。
+const legacyNativeTokenFileName = '__sync_native_token';
 const resourceFolderName = 'GardendlessLoader'; // 资源文件夹名称
 const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '0.9.0');
 const announcementTimeout = Duration(seconds: 3); //公告请求超时时间

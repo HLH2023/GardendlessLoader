@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -20,12 +19,14 @@ import 'services/announcement_service.dart';
 import 'services/app_install_service.dart';
 import 'services/app_paths_service.dart';
 import 'services/local_resource_server.dart';
+import 'services/local_save_guard.dart';
 import 'services/storage_root_service.dart';
 import 'services/app_settings_store.dart';
 import 'services/app_update_service.dart';
 import 'services/cloud_login_service.dart';
 import 'services/cloud_save_service.dart';
 import 'services/diagnostics_service.dart';
+import 'services/external_url_service.dart';
 import 'services/garden_journal.dart';
 import 'services/game_update_check_service.dart';
 import 'services/import_service.dart';
@@ -37,6 +38,8 @@ import 'services/resource_picker_service.dart';
 import 'services/shortcut_service.dart';
 import 'services/update_check_service.dart';
 import 'services/windows_update_service.dart';
+import 'services/window_service.dart';
+import 'services/windows_update_result.dart';
 import 'services/windows_updater.dart';
 
 //AppController 是整个应用的核心控制器，负责管理应用的状态、处理业务逻辑，并与 UI 进行交互。它使用 ChangeNotifier 来通知 UI 更新。
@@ -66,6 +69,7 @@ class AppController extends ChangeNotifier {
   final ShortcutService _shortcutService = ShortcutService();
   final RemoteResourceService _remoteResourceService = RemoteResourceService();
   final AppInstallService _appInstallService = const AppInstallService();
+  final ExternalUrlService _externalUrlService = const ExternalUrlService();
   late final AppUpdateService _appUpdateService = AppUpdateService(
     _remoteResourceService,
   );
@@ -75,6 +79,10 @@ class AppController extends ChangeNotifier {
   late final WindowsUpdateService _windowsUpdateService = WindowsUpdateService(
     _remoteResourceService,
   );
+
+  /// 上一次 Windows 更新的结果提示（由 `windows_update_result.json` 转成）。
+  /// 启动流程后面还会产生更紧急的提示，所以先存着，最后再决定是否显示。
+  LauncherMessage? _windowsUpdateOutcome;
   WindowsUpdateStatus _windowsUpdate = const WindowsUpdateStatus(
     phase: AppUpdatePhase.idle,
   );
@@ -88,7 +96,7 @@ class AppController extends ChangeNotifier {
 
   // 云端存档页（独立页面）的状态。刷新失败不阻塞任何游戏流程。
   CloudSaveSnapshot? _cloudSaves;
-  bool _cloudSavesLoading = false;
+  int _cloudSavesInFlight = 0;
   String? _cloudSavesError;
   Map<String, List<CloudSaveVersion>> _saveHistory =
       <String, List<CloudSaveVersion>>{};
@@ -96,6 +104,22 @@ class AppController extends ChangeNotifier {
   String? _saveHistoryError;
   String? _saveRestoreInProgress;
   String? _saveRestoreMessage;
+  // 存档页查看的分区来源：null=跟随当前游玩形态；true/false=用户手动切换。
+  // 这只影响「看哪份云端存档」，不改变正在运行/下次启动的游戏会话版本。
+  bool? _savesViewOnlineOverride;
+  int _savesViewGeneration = 0;
+  // 登录上下文（令牌 + 服务器地址）每变一次就 +1。异步请求拿到的迟到响应
+  // 用它判断「还是不是发起时那个账号」，避免旧令牌的 401 登出新账号。
+  int _authContextGeneration = 0;
+  // 历史缓存单独的代际：切分区、换账号、登出后，早先发出的响应不能回填，
+  // 否则会把 A 分区的历史显示在 B 分区下（回滚就会打到错的目录）。
+  int _saveHistoryGeneration = 0;
+  int _profileHistoryGeneration = 0;
+  Map<String, List<CloudSaveVersion>> _profileHistory =
+      <String, List<CloudSaveVersion>>{};
+  final Set<String> _profileHistoryLoading = <String>{};
+  String? _profileHistoryError;
+  String? _profileRestoreInProgress;
   RemoteResourceManifest? _remoteManifest;
   ({String? code, String message})? _remoteManifestFailure;
   bool _remoteManifestLoading = false;
@@ -254,8 +278,9 @@ class AppController extends ChangeNotifier {
 
   /// 云端存档页的状态：快照、错误、历史缓存与进行中的操作。
   CloudSaveSnapshot? get cloudSaves => _cloudSaves;
-  bool get cloudSavesLoading => _cloudSavesLoading;
-  bool get cloudSavesRefreshing => _cloudSavesLoading && _cloudSaves != null;
+  bool get cloudSavesLoading => _cloudSavesInFlight > 0;
+  bool get cloudSavesRefreshing =>
+      _cloudSavesInFlight > 0 && _cloudSaves != null;
   String? get cloudSavesError => _cloudSavesError;
   Map<String, List<CloudSaveVersion>> get saveHistory => _saveHistory;
   String? get saveHistoryError => _saveHistoryError;
@@ -263,8 +288,129 @@ class AppController extends ChangeNotifier {
   String? get saveRestoreInProgress => _saveRestoreInProgress;
   String? get saveRestoreMessage => _saveRestoreMessage;
 
+  /// 存档页当前查看的是在线版本分区还是本地资源版本分区。
+  /// 默认看本地资源版本；用户仍可手动切到在线版本查看。
+  bool get cloudSavesViewOnline => _savesViewOnlineOverride ?? false;
+
+  /// 本次查看分区对应的游戏版本（空串 = 未分区的 legacy）。
+  String get cloudSavesViewVersion {
+    if (!cloudSavesViewOnline) return (currentGameVersion ?? '').trim();
+    return (_remoteManifest?.gameVersion ?? '').trim();
+  }
+
+  Map<String, List<CloudSaveVersion>> get profileHistory => _profileHistory;
+  Set<String> get profileHistoryLoading => _profileHistoryLoading;
+  String? get profileHistoryError => _profileHistoryError;
+  String? get profileRestoreInProgress => _profileRestoreInProgress;
+
+  /// 切换存档页查看的分区。默认查看本地资源版本，允许用户手动看另一侧。
+  /// 不会改变游戏会话的版本上下文（启动时已固定）。
+  Future<void> setCloudSavesView({required bool online}) async {
+    if (cloudSavesViewOnline == online) return;
+    _savesViewOnlineOverride = online;
+    _cloudSaves = null;
+    _cloudSavesError = null;
+    // 旧分区的历史与在途响应都对新分区无效。
+    _invalidateSaveViews();
+    notifyListeners();
+    await refreshCloudSaves(force: true);
+  }
+
+  /// 分区或账号变了：丢掉历史缓存并推进代际，让在途响应无法回填。
+  void _invalidateSaveViews() {
+    _savesViewGeneration++;
+    _saveHistoryGeneration++;
+    _profileHistoryGeneration++;
+    _saveHistory = <String, List<CloudSaveVersion>>{};
+    _profileHistory = <String, List<CloudSaveVersion>>{};
+    _saveHistoryError = null;
+    _profileHistoryError = null;
+  }
+
+  /// 一个响应是否仍属于当前视图：请求没被更新的请求取代、分区没切、令牌没换。
+  bool _isCurrentSaveView({
+    required int generation,
+    required bool viewOnline,
+    required String token,
+  }) {
+    return generation == _savesViewGeneration &&
+        viewOnline == cloudSavesViewOnline &&
+        token == _appSettings.deviceToken.trim();
+  }
+
+  /// 某个存档键自己的来源分区。
+  ///
+  /// 服务端的 `keySources` 是逐键的：同一个账号的 Settings 可能来自 1.7.0，
+  /// 而玩家进度是继承来的 0.16.1，历史目录也各在自己的分区里。用整份快照的
+  /// 分区去查某个键的历史，会查到一个根本没有这个键的目录。
+  String _saveHistorySourceVersion(String key) {
+    final entry = _cloudSaves?.entryFor(key);
+    // 明确给出 legacy（空串）时不能再回退：那会去有版本的目录查一个
+    // 根本不存在于那里的键。只有老服务端没给 keySources 才回退。
+    if (entry != null && entry.sourceKnown) return entry.sourceVersion;
+    final served = (_cloudSaves?.gameVersion ?? '').trim();
+    if (served.isNotEmpty) return served;
+    return _playGameVersion();
+  }
+
+  /// 一份玩家数据自己的来源分区（与 [profileSource] 同源，按 id 取）。
+  String _profileHistorySourceVersion(String profileId) {
+    final profile = _cloudSaves?.profileFor(profileId);
+    if (profile != null && profile.sourceKnown) return profile.sourceVersion;
+    final served = (_cloudSaves?.gameVersion ?? '').trim();
+    if (served.isNotEmpty) return served;
+    return cloudSavesViewVersion;
+  }
+
+  /// 历史响应是否仍然有效。任何一项变了都丢弃：不能写入缓存，
+  /// 也不能把错误挂到新视图上。
+  bool _isCurrentSaveHistory({
+    required int generation,
+    required bool viewOnline,
+    required String token,
+    required String user,
+    required String version,
+    required String key,
+  }) {
+    return generation == _saveHistoryGeneration &&
+        viewOnline == cloudSavesViewOnline &&
+        token == _appSettings.deviceToken.trim() &&
+        user == (_cloudSaves?.user ?? _appSettings.deviceAccount) &&
+        version == _saveHistorySourceVersion(key);
+  }
+
+  bool _isCurrentProfileHistory({
+    required int generation,
+    required bool viewOnline,
+    required String token,
+    required String user,
+    required String version,
+    required String profileId,
+  }) {
+    return generation == _profileHistoryGeneration &&
+        viewOnline == cloudSavesViewOnline &&
+        token == _appSettings.deviceToken.trim() &&
+        user == (_cloudSaves?.user ?? _appSettings.deviceAccount) &&
+        version == _profileHistorySourceVersion(profileId);
+  }
+
   /// 拉取云端存档元信息。离线/未登录都不抛：页面只需要一个可读的错误码。
-  Future<void> refreshCloudSaves() async {
+  ///
+  /// 分区键必须来自「当前查看的模式」：
+  ///   - 本地资源：已校验资源包的 gameVersion。绝不能用线上版本兜底，
+  ///     否则本地旧版本会被显示成线上新版本的存档。
+  ///   - 在线：服务器当前资源清单的版本。取不到就报错，不借用本地版本。
+  Future<void> refreshCloudSaves({bool? onlineView, bool force = false}) async {
+    if (onlineView != null) {
+      final changed = onlineView != cloudSavesViewOnline;
+      _savesViewOnlineOverride = onlineView;
+      if (changed) {
+        _cloudSaves = null;
+        _cloudSavesError = null;
+        _invalidateSaveViews();
+      }
+    }
+    final viewOnline = cloudSavesViewOnline;
     final base = _appSettings.effectiveServerBaseUrl;
     final token = _appSettings.deviceToken.trim();
     if (base.isEmpty || token.isEmpty) {
@@ -273,20 +419,62 @@ class AppController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    if (_cloudSavesLoading) return;
-    _cloudSavesLoading = true;
+    // 没有新请求就退出，且**不能**推进代际：先 ++ 再 return 会把在途请求
+    // 作废却没有新请求接手，页面就一直停在「加载中」。
+    if (_cloudSavesInFlight > 0 && !force) return;
+    // 切换查看分区时允许强制开一个新请求；旧请求靠 generation 丢弃，
+    // 不能用「正在加载」把它挡掉，否则切换后页面一直空着。
+    final viewGeneration = ++_savesViewGeneration;
+    _cloudSavesInFlight++;
     _cloudSavesError = null;
     notifyListeners();
     try {
+      if (viewOnline) {
+        // 查看在线版本分区时需要服务器清单的版本号；拉不到就明确失败，
+        // 不降级用本地版本。
+        await _ensureRemoteGameVersion();
+        if ((_remoteManifest?.gameVersion ?? '').trim().isEmpty) {
+          if (_isCurrentSaveView(
+              generation: viewGeneration,
+              viewOnline: viewOnline,
+              token: token)) {
+            _cloudSaves = null;
+            _cloudSavesError = 'online_version_unavailable';
+          }
+          return;
+        }
+      } else if ((currentGameVersion ?? '').trim().isEmpty) {
+        // 本地模式没有导入资源包 → 没有本地版本分区可查。
+        // 页面提示先导入资源；用户仍可手动切到在线分区查看。
+        if (_isCurrentSaveView(
+            generation: viewGeneration, viewOnline: viewOnline, token: token)) {
+          _cloudSaves = null;
+          _cloudSavesError = 'local_resource_missing';
+        }
+        return;
+      }
+      final version = cloudSavesViewVersion;
       final snapshot = await _remoteResourceService.fetchCloudSaves(
-        gameVersion: _playGameVersion(),
+        gameVersion: version,
         token: token,
         baseUrl: base,
       );
-      if (token != _appSettings.deviceToken.trim()) return;
+      if (!_isCurrentSaveView(
+          generation: viewGeneration, viewOnline: viewOnline, token: token)) {
+        return;
+      }
       _cloudSaves = snapshot;
     } on RemoteResourceFailure catch (failure) {
+      // 先验上下文再处理令牌：否则旧令牌的 401 会把刚登录的新会话踢掉。
+      if (!_isCurrentSaveView(
+          generation: viewGeneration, viewOnline: viewOnline, token: token)) {
+        return;
+      }
       await _handleTokenRejected(failure);
+      if (!_isCurrentSaveView(
+          generation: viewGeneration, viewOnline: viewOnline, token: token)) {
+        return;
+      }
       _cloudSavesError = failure.code;
       _appLogger.emit(
         level: LogLevel.warn,
@@ -297,6 +485,10 @@ class AppController extends ChangeNotifier {
         context: <String, Object?>{'message': failure.message},
       );
     } catch (error, stackTrace) {
+      if (!_isCurrentSaveView(
+          generation: viewGeneration, viewOnline: viewOnline, token: token)) {
+        return;
+      }
       _cloudSavesError = 'cloud_saves_unavailable';
       _appLogger.emit(
         level: LogLevel.warn,
@@ -308,7 +500,8 @@ class AppController extends ChangeNotifier {
         stackTrace: stackTrace,
       );
     } finally {
-      _cloudSavesLoading = false;
+      // 计数必须无条件回退：它是「在途请求数」，漏减一次就永远显示加载中。
+      if (_cloudSavesInFlight > 0) _cloudSavesInFlight--;
       notifyListeners();
     }
   }
@@ -324,22 +517,45 @@ class AppController extends ChangeNotifier {
       return;
     }
     if (!_saveHistoryLoading.add(key)) return;
+    final generation = _saveHistoryGeneration;
+    final viewOnline = cloudSavesViewOnline;
+    // 用这个键自己的来源分区（可能不是整份快照的分区）。
+    final version = _saveHistorySourceVersion(key);
     _saveHistoryError = null;
     notifyListeners();
     try {
       final versions = await _remoteResourceService.fetchSaveHistory(
-        // 用 /load 实际返回的分区（可能是 legacy），而不是请求的版本。
-        gameVersion: _cloudSaves?.gameVersion ?? _playGameVersion(),
+        gameVersion: version,
         token: token,
         baseUrl: base,
         user: user,
         key: key,
       );
+      if (!_isCurrentSaveHistory(
+        generation: generation,
+        viewOnline: viewOnline,
+        token: token,
+        user: user,
+        version: version,
+        key: key,
+      )) {
+        return;
+      }
       _saveHistory = <String, List<CloudSaveVersion>>{
         ..._saveHistory,
         key: versions,
       };
     } on RemoteResourceFailure catch (failure) {
+      if (!_isCurrentSaveHistory(
+        generation: generation,
+        viewOnline: viewOnline,
+        token: token,
+        user: user,
+        version: version,
+        key: key,
+      )) {
+        return;
+      }
       _saveHistoryError = failure.code;
       _saveHistory = <String, List<CloudSaveVersion>>{
         ..._saveHistory,
@@ -366,6 +582,10 @@ class AppController extends ChangeNotifier {
       return false;
     }
     if (_saveRestoreInProgress != null) return false;
+    final generation = _saveHistoryGeneration;
+    final viewOnline = cloudSavesViewOnline;
+    // 回滚必须落到这个键真正所在的分区，否则回滚会写到别的版本目录。
+    final version = _saveHistorySourceVersion(key);
     _saveRestoreInProgress = key;
     _saveRestoreMessage = null;
     notifyListeners();
@@ -377,8 +597,19 @@ class AppController extends ChangeNotifier {
         key: key,
         ts: ts,
         name: name,
-        gameVersion: _cloudSaves?.gameVersion ?? _playGameVersion(),
+        gameVersion: version,
       );
+      if (!_isCurrentSaveHistory(
+        generation: generation,
+        viewOnline: viewOnline,
+        token: token,
+        user: user,
+        version: version,
+        key: key,
+      )) {
+        // 期间切了分区/换号：不能说成功，也不能刷新别人的视图。
+        return false;
+      }
       _saveRestoreMessage = 'save_restore_done';
       _appLogger.emit(
         level: LogLevel.info,
@@ -389,9 +620,19 @@ class AppController extends ChangeNotifier {
       );
       _saveRestoreInProgress = null;
       notifyListeners();
-      await refreshCloudSaves();
+      await refreshCloudSaves(force: true);
       return true;
     } on RemoteResourceFailure catch (failure) {
+      if (!_isCurrentSaveHistory(
+        generation: generation,
+        viewOnline: viewOnline,
+        token: token,
+        user: user,
+        version: version,
+        key: key,
+      )) {
+        return false;
+      }
       _saveRestoreMessage = failure.code;
       _appLogger.emit(
         level: LogLevel.warn,
@@ -404,6 +645,148 @@ class AppController extends ChangeNotifier {
       return false;
     } finally {
       _saveRestoreInProgress = null;
+      notifyListeners();
+    }
+  }
+
+  /// 拉取单个玩家的历史版本（只影响这一份玩家数据）。
+  Future<void> loadProfileHistory(String profileId) async {
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    final user = _cloudSaves?.user ?? _appSettings.deviceAccount;
+    if (base.isEmpty || token.isEmpty || user.isEmpty) {
+      _profileHistoryError = 'save_server_not_configured';
+      notifyListeners();
+      return;
+    }
+    if (!_profileHistoryLoading.add(profileId)) return;
+    final generation = _profileHistoryGeneration;
+    final viewOnline = cloudSavesViewOnline;
+    // 这份玩家数据自己的来源分区（可能不是整份快照的分区）。
+    final version = _profileHistorySourceVersion(profileId);
+    _profileHistoryError = null;
+    notifyListeners();
+    try {
+      final versions = await _remoteResourceService.fetchProfileHistory(
+        token: token,
+        baseUrl: base,
+        user: user,
+        profileId: profileId,
+        gameVersion: version,
+      );
+      if (!_isCurrentProfileHistory(
+        generation: generation,
+        viewOnline: viewOnline,
+        token: token,
+        user: user,
+        version: version,
+        profileId: profileId,
+      )) {
+        return;
+      }
+      _profileHistory = <String, List<CloudSaveVersion>>{
+        ..._profileHistory,
+        profileId: versions,
+      };
+    } on RemoteResourceFailure catch (failure) {
+      if (!_isCurrentProfileHistory(
+        generation: generation,
+        viewOnline: viewOnline,
+        token: token,
+        user: user,
+        version: version,
+        profileId: profileId,
+      )) {
+        return;
+      }
+      _profileHistoryError = failure.code;
+      _profileHistory = <String, List<CloudSaveVersion>>{
+        ..._profileHistory,
+        profileId: const <CloudSaveVersion>[],
+      };
+    } finally {
+      _profileHistoryLoading.remove(profileId);
+      notifyListeners();
+    }
+  }
+
+  /// 只回滚一份玩家数据；其它玩家与共享键不变。
+  Future<bool> restoreProfileVersion({
+    required String profileId,
+    required int ts,
+    String name = '',
+  }) async {
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    final user = _cloudSaves?.user ?? _appSettings.deviceAccount;
+    if (base.isEmpty || token.isEmpty || user.isEmpty) {
+      _saveRestoreMessage = 'save_server_not_configured';
+      notifyListeners();
+      return false;
+    }
+    if (_profileRestoreInProgress != null) return false;
+    final generation = _profileHistoryGeneration;
+    final viewOnline = cloudSavesViewOnline;
+    final version = _profileHistorySourceVersion(profileId);
+    _profileRestoreInProgress = profileId;
+    _saveRestoreMessage = null;
+    notifyListeners();
+    try {
+      await _remoteResourceService.restoreProfileVersion(
+        token: token,
+        baseUrl: base,
+        user: user,
+        profileId: profileId,
+        ts: ts,
+        name: name,
+        gameVersion: version,
+      );
+      if (!_isCurrentProfileHistory(
+        generation: generation,
+        viewOnline: viewOnline,
+        token: token,
+        user: user,
+        version: version,
+        profileId: profileId,
+      )) {
+        // 期间切了分区/换号：不能说成功，也不能刷新别人的视图。
+        return false;
+      }
+      _saveRestoreMessage = 'save_restore_done';
+      _appLogger.emit(
+        level: LogLevel.info,
+        category: 'cloud.saves',
+        event: 'cloud_profile_restored',
+        outcome: LogOutcome.succeeded,
+        context: <String, Object?>{'profileId': profileId, 'ts': ts},
+      );
+      _profileRestoreInProgress = null;
+      notifyListeners();
+      await refreshCloudSaves(force: true);
+      return true;
+    } on RemoteResourceFailure catch (failure) {
+      if (!_isCurrentProfileHistory(
+        generation: generation,
+        viewOnline: viewOnline,
+        token: token,
+        user: user,
+        version: version,
+        profileId: profileId,
+      )) {
+        return false;
+      }
+      _saveRestoreMessage = failure.code;
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'cloud.saves',
+        event: 'cloud_profile_restore',
+        outcome: LogOutcome.failed,
+        code: failure.code,
+        context: <String, Object?>{'profileId': profileId, 'ts': ts},
+      );
+      return false;
+    } finally {
+      _profileRestoreInProgress = null;
       notifyListeners();
     }
   }
@@ -426,7 +809,7 @@ class AppController extends ChangeNotifier {
   String get cloudAccount => _appSettings.deviceAccount;
   bool get cloudAccountKnown => _appSettings.deviceAccount.isNotEmpty;
 
-  /// 全局登录态：启动器级别的一份身份，云存档/资源下载/在线游玩共用。
+  /// 全局登录态：启动器级别的一份身份，云存档/资源下载共用。
   bool get accountSignedIn => _appSettings.hasDeviceToken;
   String get accountDisplayName => _appSettings.deviceAccount.isNotEmpty
       ? _appSettings.deviceAccount
@@ -475,37 +858,21 @@ class AppController extends ChangeNotifier {
   String? get gpNextCompatibilityError =>
       _currentValidation.gpNextCompatibilityError ??
       _manifest.gpNextCompatibilityError;
+
   /// 是否桌面平台（Windows/Linux/macOS）：游戏跑在进程内 WebView + 本地服务器。
   bool get isDesktopPlatform =>
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
-
-  /// 当前游玩形态。
-  PlayMode get playMode => _appSettings.playMode;
-
-  /// 在线形态是否可用。
-  ///
-  /// 桌面端：配置了服务器即可（未登录也能玩，只是没有云存档）。
-  /// Android：还必须已登录 —— 在线资源走服务器 `/_save/online/`，该路由要
-  /// Bearer 设备令牌，未登录会 401，宁可提前拦住也不要让玩家看到白屏。
-  bool get onlinePlaySupported {
-    if (_appSettings.effectiveServerBaseUrl.isEmpty) return false;
-    if (isDesktopPlatform) return true;
-    if (Platform.isAndroid) return _appSettings.hasDeviceToken;
-    return false;
-  }
 
   /// 启动是否正在进行（防重复进入：快捷键与按钮点击可能同时触发）。
   bool _gameLaunchInFlight = false;
   bool get gameLaunchInFlight => _gameLaunchInFlight;
 
-  /// 桌面端游戏窗口是否正在运行（迁移/切形态时必须让路）。
+  /// 桌面端游戏窗口是否正在运行（迁移/启动互斥时必须让路）。
   bool _desktopGameActive = false;
   bool get desktopGameActive => _desktopGameActive;
 
-  /// 是否具备开始游戏的条件（按形态判定）。
-  bool get canStartGame => playMode == PlayMode.online
-      ? onlinePlaySupported
-      : hasCurrentResource;
+  /// 是否具备开始游戏的条件：只要求本地资源已校验通过。
+  bool get canStartGame => hasCurrentResource;
 
   /// 用系统默认浏览器打开设备令牌签发页（桌面端登录第一步）。
   ///
@@ -514,21 +881,31 @@ class AppController extends ChangeNotifier {
     final url = deviceTokenUrl;
     if (url.isEmpty) return;
     try {
-      if (Platform.isWindows) {
-        await Process.run('cmd', ['/c', 'start', '', url], runInShell: false);
-      } else if (Platform.isMacOS) {
-        await Process.run('open', [url]);
-      } else if (Platform.isLinux) {
-        await Process.run('xdg-open', [url]);
-      } else {
-        await const MethodChannel('io.github.dey410.gardendlessloader/external_browser')
-            .invokeMethod<void>('open', <String, Object?>{'url': url});
-      }
+      await _externalUrlService.open(url);
     } catch (error) {
       _appLogger.emit(
         level: LogLevel.warn,
         category: 'cloud.login',
         event: 'open_token_page_failed',
+        outcome: LogOutcome.failed,
+        error: error,
+      );
+    }
+  }
+
+  /// 用系统默认浏览器打开外部链接（公告、更新说明等）。
+  ///
+  /// 桌面端不能直接调 `external_browser` 通道（没有原生实现，会抛
+  /// MissingPluginException 并让点击静默失效），分支收在
+  /// [ExternalUrlService] 里。
+  Future<void> openExternalUrl(String url) async {
+    try {
+      await _externalUrlService.open(url);
+    } catch (error) {
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'app.shell',
+        event: 'open_external_url_failed',
         outcome: LogOutcome.failed,
         error: error,
       );
@@ -566,16 +943,20 @@ class AppController extends ChangeNotifier {
 
   /// 退出登录：清掉设备令牌（服务器端令牌仍有效，需要时可在存档页吊销）。
   Future<void> signOutAccount() async {
-    await _updateAppSettings(_appSettings.copyWith(deviceToken: '', deviceAccount: ''));
-    // 存档页展示的是上一份快照：不清空就会把「别人的/已登出的」数据继续显示
+    await _updateAppSettings(
+        _appSettings.copyWith(deviceToken: '', deviceAccount: ''));
+    // 存档页展示的是上一份快照：不清空就会把「别人的/已登出的」数据继续显示。
+    // 历史缓存与代际一起清：登出后回来的响应不许再填回来。
     _cloudSaves = null;
-    _saveHistory = <String, List<CloudSaveVersion>>{};
+    _invalidateSaveViews();
     // 退出登录必须把这个明文令牌文件也抹掉：它躺在资源根目录里，
     // 用户能改到任意位置，留着等于登出没登出。
     final root = _paths?.root;
     if (root != null) {
       await _deleteFileQuietly(File(p.join(root.path, syncBridgeFileName)));
-      await _deleteFileQuietly(File(p.join(root.path, nativeTokenFileName)));
+      await _deleteFileQuietly(
+        File(p.join(root.path, legacyNativeTokenFileName)),
+      );
     }
     _appLogger.emit(
       level: LogLevel.info,
@@ -614,7 +995,7 @@ class AppController extends ChangeNotifier {
       _remoteManifest = null;
       _remoteManifestFailure = null;
       _cloudSaves = null;
-      _saveHistory = <String, List<CloudSaveVersion>>{};
+      _invalidateSaveViews();
       _cloudLogin = const CloudLoginStatus(phase: CloudLoginPhase.succeeded);
       _appLogger.emit(
         level: LogLevel.info,
@@ -651,29 +1032,6 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  /// 切换游玩形态（立即持久化）。
-  Future<void> setPlayMode(PlayMode mode) async {
-    if (_appSettings.playMode == mode) return;
-    if (_storageBusy ||
-        isImporting ||
-        _desktopGameActive ||
-        _gameLaunchInFlight ||
-        resourceTransactionBusy(_manifest.transactionState)) {
-      // 形态决定「资源从哪来」，跑到一半切换会让当前会话的来源与设置不一致；
-      // 上个事务没恢复完（崩溃窗口）同样不能切。
-      return;
-    }
-    await _updateAppSettings(_appSettings.copyWith(playMode: mode));
-    _appLogger.emit(
-      level: LogLevel.info,
-      category: 'game.host',
-      event: 'play_mode_changed',
-      outcome: LogOutcome.succeeded,
-      context: <String, Object?>{'mode': mode.name},
-    );
-    notifyListeners();
-  }
-
   // ===== 存储位置（资源包根目录）=====
   bool _storageBusy = false;
   bool _storageFromConfigured = false;
@@ -698,7 +1056,8 @@ class AppController extends ChangeNotifier {
   /// 校验候选目录是否可用作存储位置（不改状态）
   Future<StorageCheck> checkStorageTarget(String path) {
     final current = _paths?.root;
-    return _pathsService.storage.validate(Directory(path.trim()), currentRoot: current);
+    return _pathsService.storage
+        .validate(Directory(path.trim()), currentRoot: current);
   }
 
   /// 刷新占用统计
@@ -818,14 +1177,19 @@ class AppController extends ChangeNotifier {
         _appSettingsStore = AppSettingsStore(_paths!.appSettingsFile);
         _appSettings = await _appSettingsStore!.read();
         _applyLanguage(_appSettings.languagePreference);
-        // 原生在线宿主发现令牌被拒（401）时会带 tokenRejected 原因退出。
-        // 引擎已销毁，这一步只能在下次启动做：清掉本地令牌并明确提示，
-        // 否则用户会一直看到「已登录但所有云功能静默失败」。
-        if (exitResultRequiresSignOut(
-            exitResult, hasToken: _appSettings.deviceToken.trim().isNotEmpty)) {
+        // Windows 更新是「退出应用 → 外部脚本覆盖 → 自动重启」，结果只能靠
+        // 脚本写的回执在下次启动时告诉用户：成功 / 已回滚 / 失败原因。
+        // 先算出来、写日志，最后再决定要不要占用 _message：启动失败这类
+        // 更紧急的提示优先。
+        await _consumeWindowsUpdateResult(_paths!);
+        // 旧版原生在线宿主发现令牌被拒（401）时会带 tokenRejected 原因退出。
+        // 在线游玩已删除，但保留这条恢复路径：升级前留下的退出结果仍可能
+        // 带上它，且清掉失效令牌比继续静默失败更安全。
+        if (exitResultRequiresSignOut(exitResult,
+            hasToken: _appSettings.deviceToken.trim().isNotEmpty)) {
           await signOutAccount();
           _message = const LauncherMessage(
-            '登录状态已失效，请重新登录后再使用在线功能',
+            '登录状态已失效，请重新登录后再使用云端功能',
             'save_token_rejected',
           );
           _appLogger.emit(
@@ -930,6 +1294,9 @@ class AppController extends ChangeNotifier {
             exitResult?.message,
           );
         }
+        // 更新结果只有在没有更紧急的提示（导入中断、启动失败等）时才占用
+        // 顶部提示；无论是否显示，详细结果和脚本日志路径都已写进日志。
+        _message ??= _windowsUpdateOutcome;
         _initialized = true;
         // Every game exit leaves an exit result, so only a cold start skips
         // the launcher; returning from the game always shows it.
@@ -1625,33 +1992,34 @@ class AppController extends ChangeNotifier {
 
   /// 当前游玩所用的游戏版本（存档按版本隔离用）。
   ///
-  /// 本地形态用资源包版本；在线形态用**服务器当前那套资源**的版本，
-  /// 否则会用本地残留的旧版本号给存档分区，导致存档写错版本目录。
-  String _playGameVersion() {
-    if (playMode == PlayMode.online) {
-      final remote = _remoteManifest?.gameVersion?.trim() ?? '';
-      if (remote.isNotEmpty) return remote;
-    }
-    return (currentGameVersion ?? '').trim();
-  }
+  /// 只使用本地资源包校验出的版本；在线游玩形态已删除，服务器版本只用于
+  /// 存档页「在线版本」分区查看，不能混进本机存档分区。
+  String _playGameVersion() => (currentGameVersion ?? '').trim();
 
-  /// 在线形态进入游戏前，尽力把服务器的资源清单拉下来。
+  /// 取服务器当前资源清单的版本号，供存档页「在线版本」分区使用。
   ///
-  /// 存档按游戏版本分区：在线形态必须用**服务器当前那套资源**的版本号。
-  /// 如果只用户本地残留的版本（在线模式本来就不需要本地资源，常常是空的或过期的），
-  /// 存档会被记到错误的版本目录下 —— 表现为「在线玩了一晚上，本地进游戏看不到存档」。
-  /// 拉取失败不阻断启动：退化成当前已知版本，仅记录日志。
-  Future<void> _ensureOnlineGameVersion() async {
-    if (playMode != PlayMode.online) return;
+  /// 存档按游戏版本分区：查看在线分区必须用**服务器当前那套资源**的版本号。
+  /// 拉取失败不阻断任何本地流程：失败由 refreshCloudSaves 明确报
+  /// `online_version_unavailable`，绝不借用本地版本。
+  Future<void> _ensureRemoteGameVersion() async {
     if ((_remoteManifest?.gameVersion ?? '').trim().isNotEmpty) return;
+    final authGeneration = _authContextGeneration;
     final base = _appSettings.effectiveServerBaseUrl;
     final token = _appSettings.deviceToken.trim();
     if (base.isEmpty || token.isEmpty) return;
+    // 请求在途期间用户可能重新登录或换服务器：只有「发起时那套凭据」仍然
+    // 有效，结果才属于当前会话。迟到的 401 若直接走 _handleTokenRejected，
+    // 会把刚登录的新令牌当成过期令牌清掉。
+    bool isCurrentAuthContext() =>
+        authGeneration == _authContextGeneration &&
+        base == _appSettings.effectiveServerBaseUrl &&
+        token == _appSettings.deviceToken.trim();
     try {
       final manifest = await _remoteResourceService.fetchManifest(
         token: token,
         baseUrl: base,
       );
+      if (!isCurrentAuthContext()) return;
       _remoteManifest = manifest;
       _appLogger.emit(
         level: LogLevel.info,
@@ -1661,7 +2029,9 @@ class AppController extends ChangeNotifier {
         context: <String, Object?>{'gameVersion': manifest.gameVersion ?? ''},
       );
     } catch (error) {
-      // 服务器拒绝令牌时一并清理登录态，否则在线形态会一直白屏式失败
+      // 先验上下文再处理令牌：旧令牌的 401 不许登出新账号。
+      if (!isCurrentAuthContext()) return;
+      // 服务器拒绝令牌时一并清理登录态，否则云功能会持续静默失败。
       await _handleTokenRejected(error);
       _appLogger.emit(
         level: LogLevel.warn,
@@ -1674,85 +2044,10 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  /// 安卓在线形态启动。
+  /// 桌面端准备游戏：基于已校验的本地资源包起本地服务器，返回要加载的地址。
   ///
-  /// 在线形态必须已登录：`/_save/online/` 走 Bearer 鉴权（不用 authentik cookie，
-  /// 因为 App 的 WebView 是跨站环境带不上 cookie）。
-  Future<void> _startAndroidOnlineGame(AppPaths paths) async {
-    final base = _appSettings.effectiveServerBaseUrl;
-    if (base.isEmpty) {
-      const failure = '还没有配置服务器地址，无法在线游玩';
-      _message = const LauncherMessage(failure, 'online_play_no_server');
-      notifyListeners();
-      throw StateError(failure);
-    }
-    if (!_appSettings.hasDeviceToken) {
-      const failure = '在线游玩需要先登录账号';
-      _message = const LauncherMessage(failure, 'online_play_needs_signin');
-      notifyListeners();
-      throw StateError(failure);
-    }
-    // 必须**先**确认服务器当前的游戏版本，再构造 session：
-    // session.gameVersion 会传给原生心跳（/_save/app/online/enter）和会话编解码，
-    // 用旧版本号上报会让在线登记挂到错的游戏版本上。
-    await _ensureOnlineGameVersion();
-    final session = GameSession(
-      sessionId: _newGameSessionId(),
-      packageId: null,
-      resourceRoot: paths.root.path,
-      appRoot: paths.root.path,
-      mode: GameSessionMode.online,
-      originOverride: base,
-      // 原生侧用它们做在线会话心跳（Dart 定时器随引擎销毁活不下来）
-      gameVersion: _playGameVersion(),
-      deviceId: _appSettings.deviceAccount.trim().isEmpty
-          ? 'launcher'
-          : _appSettings.deviceAccount.trim(),
-      platform: gameHostPlatform,
-      // 服务端 /_save/online/ 是「游戏本体 + Bearer 鉴权 + 不注入脚本」的路由
-      entryPath: '_save/online/index.html',
-      activationGeneration: _manifest.generation,
-      hasGpNext: hasGpNext,
-      gpNextCompatible: gpNextCompatible,
-      gpNextVersion: gpNextVersion,
-      watermarkEnabled: watermarkEnabled,
-      autoCollectSunEnabled: _manifest.autoCollectSunEnabled,
-      detailedAudioDiagnosticsEnabled: detailedAudioDiagnosticsEnabled,
-      renderScale: renderResolution.scale,
-      screenFit: screenFit,
-      touchDiagnosticsEnabled: toolShedUnlocked && touchDiagnosticsEnabled,
-      gestureHint: _appSettings.gestureHintShown
-          ? null
-          : AppStrings.current.gestureHintLines(gameHostPlatform),
-      allowedRemoteHosts: _allowedRemoteHosts(),
-      gpNextRoot: paths.gpNextDir.path,
-      exportTemporaryRoot: Directory(p.join(paths.gpNextDir.path, '.exports')).path,
-    );
-    final store = _gameSessionStore ??= GameSessionStore(paths.root);
-    // 存档桥必须先落盘：原生侧从 appRoot 读它拿设备令牌
-    await _prepareSaveBridge(paths.root);
-    if (_appSettings.gestureHintShown == false && session.gestureHint != null) {
-      await _updateAppSettings(_appSettings.copyWith(gestureHintShown: true));
-    }
-    await store.prepare(session);
-    // 心跳不在这里起：MainActivity 拉起 GameActivity 后会 finish，Flutter 引擎
-    // 随之销毁，Dart 定时器活不过一个 tick。在线会话的心跳与注销由原生
-    // GameActivity 负责（见 OnlineGameResourceClient + GameActivity.startOnlineHeartbeat）。
-    final operation = _appLogger.startOperation(
-      operationId: _newOperationId('game-launch-online'),
-      category: 'game.host',
-      startedEvent: 'game_host_launch_started',
-      finishedEvent: 'game_host_launch_finished',
-      failureCode: 'game_host_launch_failed',
-      gameSessionId: session.sessionId,
-    );
-    await operation.run(() => _gameHost.launch(session));
-  }
-
-  /// 桌面端准备游戏：起本地服务器（本地资源 / 反代上游），返回要加载的地址。
-  ///
-  /// 两种形态都经过 [LocalResourceServer]，页面 origin 固定是 127.0.0.1，
-  /// 存档桥（设备令牌）注入方式相同 —— 这就是「存档行为一致」的实现基础。
+  /// 页面 origin 固定是 127.0.0.1，存档桥（短时会话令牌）注入方式与 Android
+  /// 一致 —— 这就是「存档行为一致」的实现基础。
   Future<DesktopGameLaunch> prepareDesktopGame() async {
     // 桌面端的启动互斥：prepareDesktopGame 会起本地资源服务器 + CEF 窗口，
     // 而 _desktopGameActive 要等服务器起来之后才置位，中间这段 await 里
@@ -1774,60 +2069,127 @@ class AppController extends ChangeNotifier {
   Future<DesktopGameLaunch> _prepareDesktopGameInternal() async {
     final paths = _requirePaths();
     _message = null;
-    final mode = playMode;
-    final base = _appSettings.effectiveServerBaseUrl;
 
-    if (mode == PlayMode.online && base.isEmpty) {
-      const failure = '还没有配置服务器地址，无法在线游玩';
-      _message = const LauncherMessage(failure, 'online_play_no_server');
+    if (!_currentValidation.isValid) {
+      _message = _failureMessage(
+        _currentValidation.errorCode,
+        _currentValidation.errorMessage,
+      );
+      notifyListeners();
+      throw StateError(_message!.text);
+    }
+    final resourceDirectory = _importService.activeDirectory(paths, _manifest);
+    if (resourceDirectory == null) {
+      const failure = '没有可用的资源包';
+      _message = const LauncherMessage(failure, 'local_play_no_resource');
       notifyListeners();
       throw StateError(failure);
     }
-    Directory? resourceDirectory;
-    if (mode == PlayMode.local) {
-      if (!_currentValidation.isValid) {
-        _message = _failureMessage(
-          _currentValidation.errorCode,
-          _currentValidation.errorMessage,
-        );
-        notifyListeners();
-        throw StateError(_message!.text);
-      }
-      resourceDirectory = _importService.activeDirectory(paths, _manifest);
-      if (resourceDirectory == null) {
-        const failure = '没有可用的资源包';
-        _message = const LauncherMessage(failure, 'local_play_no_resource');
-        notifyListeners();
-        throw StateError(failure);
-      }
-    }
 
-    await _ensureOnlineGameVersion();
     final bridge = await buildSaveBridgeScript();
-    final server = await LocalResourceServer.start(
-      root: resourceDirectory,
-      bridgeScript: bridge,
-      upstream: mode == PlayMode.online ? Uri.parse('$base/') : null,
-    );
+    // 本机存档版本保护必须独立于登录：未登录时 bridge 为空，但降级保护
+    // 仍然要在游戏读取 localStorage 之前执行。
+    final guard = buildLocalSaveGuardScript(_playGameVersion());
+    final injectedScript = <String>[
+      // guard 非空时必须在页面脚本最前面执行；空版本（旧式未索引资源包）
+      // 无法比较版本，桌面端沿用既有语义：不注入，但存档桥照常工作。
+      if (guard.isNotEmpty) guard,
+      if (bridge.isNotEmpty) bridge,
+    ].join('\n;\n');
+    // 桌面端必须用稳定 origin：端口进了 origin，随机端口会让 localStorage
+    // 变成一次性存储（既不隔离也不持久）。首次分配后持久化，之后固定复用；
+    // 端口被占用时明确失败，不静默换一个新 origin。
+    LocalResourceServer server;
+    try {
+      server = await _startDesktopServer(
+        root: resourceDirectory,
+        bridgeScript: injectedScript,
+      );
+    } on LocalPortUnavailableException catch (error) {
+      _appLogger.emit(
+        level: LogLevel.error,
+        category: 'game.host',
+        event: 'desktop_port_unavailable',
+        outcome: LogOutcome.failed,
+        code: 'desktop_port_unavailable',
+        context: <String, Object?>{'port': error.port},
+      );
+      const failure = '桌面端固定端口被占用，游戏无法启动。请关闭占用该端口的程序后重试；'
+          '不要删除应用数据，换端口会换掉存档所在的 origin。';
+      _message = const LauncherMessage(failure, 'desktop_port_unavailable');
+      notifyListeners();
+      rethrow;
+    }
     // 服务器已经占住端口和句柄：从这里往后的任何失败都必须停掉它
     try {
-      return await _finishDesktopPrepare(server, bridge, mode, base);
+      return await _finishDesktopPrepare(server, bridge);
     } catch (_) {
-      await _stopOnlineHeartbeat();
       await server.stop();
       rethrow;
+    }
+  }
+
+  /// 桌面端用固定端口启动本地资源服务器。
+  ///
+  /// 已持久化的端口直接复用；端口被占用时抛出，由调用方明确失败（换端口
+  /// 就是换 origin，不能让用户以为存档丢了）。首次分配只在**绑定成功后**
+  /// 才写进设置，避免「先持久化、绑定失败」留下一个永远不可用的端口。
+  Future<LocalResourceServer> _startDesktopServer({
+    required Directory root,
+    required String bridgeScript,
+  }) async {
+    final saved = _appSettings.desktopLocalPort;
+    if (saved > 0) {
+      return LocalResourceServer.start(
+        root: root,
+        bridgeScript: bridgeScript,
+        port: saved,
+      );
+    }
+    for (var attempt = 0; attempt < 8; attempt++) {
+      final candidate = await _findFreeLoopbackPort();
+      if (candidate <= 0) continue;
+      try {
+        final server = await LocalResourceServer.start(
+          root: root,
+          bridgeScript: bridgeScript,
+          port: candidate,
+        );
+        // 端口已经绑上了：写设置失败必须把服务器停掉再抛，否则会漏一个
+        // 监听中的 socket，而且内存里「已分配端口」与磁盘上的不一致。
+        try {
+          await _updateAppSettings(
+            _appSettings.copyWith(desktopLocalPort: candidate),
+          );
+        } catch (_) {
+          await server.stop();
+          rethrow;
+        }
+        return server;
+      } on LocalPortUnavailableException {
+        // 探测与绑定之间的竞态：换一个候选端口重试。已持久化的端口
+        // 不走这条路径，不会悄悄换 origin。
+        continue;
+      }
+    }
+    throw StateError('无法为桌面端分配固定端口');
+  }
+
+  Future<int> _findFreeLoopbackPort() async {
+    try {
+      final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final port = socket.port;
+      await socket.close();
+      return port;
+    } catch (_) {
+      return 0;
     }
   }
 
   Future<DesktopGameLaunch> _finishDesktopPrepare(
     LocalResourceServer server,
     String bridge,
-    PlayMode mode,
-    String base,
   ) async {
-    if (mode == PlayMode.online) {
-      _startOnlineHeartbeat();
-    }
     _desktopGameActive = true;
     notifyListeners();
     _appLogger.emit(
@@ -1836,98 +2198,28 @@ class AppController extends ChangeNotifier {
       event: 'desktop_host_started',
       outcome: LogOutcome.succeeded,
       context: <String, Object?>{
-        'mode': mode.name,
         'port': server.port,
         'cloud_saves': bridge.isNotEmpty,
-        if (mode == PlayMode.online) 'server': maskedServerBase(base),
       },
     );
     return DesktopGameLaunch(
       uri: server.baseUri,
       server: server,
-      mode: mode == PlayMode.online ? DesktopPlayMode.online : DesktopPlayMode.local,
       hasCloudSaves: bridge.isNotEmpty,
     );
-  }
-
-  Timer? _onlineHeartbeatTimer;
-
-  /// 在线游玩心跳：服务器据此判断「能否安全地切换资源版本」。
-  ///
-  /// 失败一律静默 —— 心跳只是给服务端做更新的让路判断，
-  /// 不能因为网络抖动让玩家进不去游戏。
-  Future<void> _onlineHeartbeat() async {
-    final base = _appSettings.effectiveServerBaseUrl;
-    final token = _appSettings.deviceToken.trim();
-    if (base.isEmpty || token.isEmpty) return;
-    final deviceId = _appSettings.deviceAccount.trim().isEmpty
-        ? 'launcher'
-        : _appSettings.deviceAccount.trim();
-    final body = jsonEncode(<String, Object?>{
-      'gameVersion': _playGameVersion(),
-      'device': {'id': deviceId, 'label': Platform.operatingSystem},
-    });
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
-    try {
-      final request = await client.postUrl(Uri.parse('$base/_save/app/online/enter'));
-      request.headers.contentType = ContentType.json;
-      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
-      request.add(utf8.encode(body));
-      final response = await request.close();
-      await response.drain<void>();
-    } catch (_) {
-      // 静默：心跳失败不影响游玩
-    } finally {
-      client.close(force: true);
-    }
-  }
-
-  void _startOnlineHeartbeat() {
-    _onlineHeartbeatTimer?.cancel();
-    unawaited(_onlineHeartbeat());
-    _onlineHeartbeatTimer = Timer.periodic(
-      const Duration(seconds: 60),
-      (_) => unawaited(_onlineHeartbeat()),
-    );
-  }
-
-  Future<void> _stopOnlineHeartbeat() async {
-    _onlineHeartbeatTimer?.cancel();
-    _onlineHeartbeatTimer = null;
-    final base = _appSettings.effectiveServerBaseUrl;
-    final token = _appSettings.deviceToken.trim();
-    if (base.isEmpty || token.isEmpty) return;
-    final deviceId = _appSettings.deviceAccount.trim().isEmpty
-        ? 'launcher'
-        : _appSettings.deviceAccount.trim();
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
-    try {
-      final request = await client.postUrl(Uri.parse('$base/_save/app/online/leave'));
-      request.headers.contentType = ContentType.json;
-      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
-      request.add(utf8.encode(jsonEncode(<String, Object?>{
-        'device': {'id': deviceId},
-      })));
-      final response = await request.close();
-      await response.drain<void>();
-    } catch (_) {
-    } finally {
-      client.close(force: true);
-    }
   }
 
   /// 桌面端游戏窗口关闭后收尾。
   Future<void> finishDesktopGame(DesktopGameLaunch launch) async {
     _desktopGameActive = false;
     notifyListeners();
-    await _stopOnlineHeartbeat();
     await launch.server.stop();
     _appLogger.emit(
       level: LogLevel.info,
       category: 'game.host',
       event: 'desktop_host_stopped',
       outcome: LogOutcome.succeeded,
-      context: <String, Object?>{'mode': launch.mode.name},
+      context: <String, Object?>{'port': launch.server.port},
     );
   }
 
@@ -1954,13 +2246,6 @@ class AppController extends ChangeNotifier {
 
   Future<void> _startGameInternal(AppPaths paths) async {
     _message = null;
-
-    // ── 安卓在线形态 ──
-    // 不读本地资源，会话 origin 直接指向服务器的 /_save/online/（Bearer 鉴权、
-    // 服务端不做脚本注入），原生侧带令牌取资源并注入同一份存档桥。
-    if (playMode == PlayMode.online && Platform.isAndroid) {
-      return _startAndroidOnlineGame(paths);
-    }
 
     final activeDirectory = _importService.activeDirectory(paths, _manifest);
     if (!_currentValidation.isValid) {
@@ -1997,6 +2282,9 @@ class AppController extends ChangeNotifier {
       renderScale: renderResolution.scale,
       screenFit: screenFit,
       touchDiagnosticsEnabled: toolShedUnlocked && touchDiagnosticsEnabled,
+      // 有游戏版本才可能生成版本保护脚本；无版本（旧式未索引资源包）沿用
+      // 原有语义：不写 guard，原生也不要求它。
+      localSaveGuardRequired: _playGameVersion().isNotEmpty,
       gestureHint: _appSettings.gestureHintShown
           ? null
           : AppStrings.current.gestureHintLines(gameHostPlatform),
@@ -2981,8 +3269,9 @@ class AppController extends ChangeNotifier {
     if (base.isEmpty || token.isEmpty) {
       _windowsUpdate = WindowsUpdateStatus(
         phase: AppUpdatePhase.failed,
-        errorCode:
-            base.isEmpty ? 'save_server_invalid' : 'windows_update_not_signed_in',
+        errorCode: base.isEmpty
+            ? 'save_server_invalid'
+            : 'windows_update_not_signed_in',
         message: strings.saveServerNotConfigured,
       );
       notifyListeners();
@@ -3273,6 +3562,32 @@ class AppController extends ChangeNotifier {
       final script = await WindowsUpdaterScript.write(
         File(p.join(file.parent.path, 'apply-windows-update.ps1')),
       );
+      // 退出前先落一份 pending 回执：脚本万一没起来（被杀软拦下、
+      // 权限不足、机器重启），下次启动仍能告诉用户「上次更新没完成」，
+      // 而不是让用户以为更新成功了。
+      final resultFile = _requirePaths().windowsUpdateResultFile;
+      final fromVersion = _installedVersionName;
+      try {
+        await resultFile.writeAsString(
+          jsonEncode(<String, Object?>{
+            'status': 'pending',
+            'code': 'apply-started',
+            'message': '已启动外部更新脚本，等待覆盖安装目录',
+            'fromVersion': fromVersion,
+            'toVersion': release.version,
+            'at': DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+          }),
+          flush: true,
+        );
+      } catch (error) {
+        _appLogger.emit(
+          level: LogLevel.warn,
+          category: 'app.update',
+          event: 'windows_update_result_write_failed',
+          outcome: LogOutcome.failed,
+          error: error,
+        );
+      }
       _windowsUpdate = WindowsUpdateStatus(
         phase: AppUpdatePhase.installing,
         release: release,
@@ -3288,26 +3603,29 @@ class AppController extends ChangeNotifier {
           'target': target.target.path,
         },
       );
-      await Process.start(
-        'powershell.exe',
-        <String>[
-          '-NoProfile',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-File',
-          script.path,
-          '-WaitPid',
-          pid.toString(),
-          '-Zip',
-          file.path,
-          '-Target',
-          target.target.path,
-          '-Exe',
-          target.exe,
-        ],
-        mode: ProcessStartMode.detached,
+      final process = await WindowsUpdaterScript.start(
+        script: script,
+        waitPid: pid,
+        zip: file,
+        target: target.target.path,
+        exe: target.exe,
+        fromVersion: fromVersion,
+        toVersion: release.version,
+        result: resultFile,
       );
-      exit(0);
+      // 只信 pid 不够：Windows 上「启动成功但其实没执行」是真实存在的
+      // （detached 模式，2026-10-27 实测）。脚本第一件事就是写日志，这里给
+      // 它 700 ms 证明自己还活着；它要是秒退，宁可取消这次更新也别消失。
+      var exited = false;
+      process.exitCode.then((_) => exited = true).ignore();
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      if (exited) {
+        throw StateError('更新脚本启动后立即退出（未开始执行）');
+      }
+      // 立刻退出会让「正在退出并安装更新…」这一帧来不及画：留一点时间把
+      // 状态刷出去。脚本按 pid 等本进程退出，所以这段延迟不影响替换时机。
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      await _quitForUpdate();
     } catch (error, stackTrace) {
       _windowsUpdate = WindowsUpdateStatus(
         phase: AppUpdatePhase.failed,
@@ -3324,7 +3642,31 @@ class AppController extends ChangeNotifier {
         error: error,
         stackTrace: stackTrace,
       );
+      // 脚本没起来（powershell 被拦、磁盘满）：pending 回执必须撤掉，
+      // 否则下次启动会误报「上次更新被中断」。
+      await _deleteFileQuietly(_requirePaths().windowsUpdateResultFile);
       notifyListeners();
+    }
+  }
+
+  /// 退出应用，把安装目录交给外部更新脚本覆盖。
+  ///
+  /// 为什么不用 `exit(0)`（2026-10-27 用户实测）：硬终止进程时 CEF 的线程还在
+  /// 跑，CRT 的 teardown 会 fail-fast（Windows 事件日志 `0xc0000409` /
+  /// `ucrtbase.dll`，还会生成 WER 转储）。用户看到的是「点了更新，应用崩了」，
+  /// 而且崩溃事件会让杀软/系统误判成一次异常退出。
+  /// 关闭主窗口走的是 runner 自己的退出路径（消息循环结束 → CoUninitialize），
+  /// 实测没有崩溃记录。
+  Future<void> _quitForUpdate() async {
+    final graceful = await WindowService.instance.quit();
+    if (!graceful) {
+      // 通道不可用（旧版 runner / 非 Windows）：只能硬退，否则更新永远不开始。
+      exit(0);
+    } else {
+      // 正常路径下窗口关闭后进程自己就没了。万一被 CEF 的清理卡住，
+      // 兜底硬退出：绝不能让用户停在「什么都没发生」的状态。
+      await Future<void>.delayed(const Duration(seconds: 6));
+      exit(0);
     }
   }
 
@@ -3333,11 +3675,13 @@ class AppController extends ChangeNotifier {
     final file = _windowsUpdateFile;
     if (!Platform.isWindows || file == null) return;
     try {
-      await Process.start(
-        'explorer.exe',
-        <String>[file.parent.path],
-        mode: ProcessStartMode.detached,
-      );
+      // 不用 detached：Windows 上它会「成功返回 pid 却不执行」（2026-10-27
+      // 实测，同一个坑把自动更新也坑掉了）。explorer 打开目录后自己就退出，
+      // 普通模式不会拖住应用。
+      final process =
+          await Process.start('explorer.exe', <String>[file.parent.path]);
+      process.stdout.drain<void>().ignore();
+      process.stderr.drain<void>().ignore();
     } catch (error, stackTrace) {
       _appLogger.emit(
         level: LogLevel.warn,
@@ -3482,31 +3826,105 @@ class AppController extends ChangeNotifier {
     return hosts;
   }
 
+  /// Windows 更新回执：覆盖脚本在应用退出后写 `windows_update_result.json`
+  /// （成功 / 已回滚 / 失败 + 日志路径），启动时读一次就删，转成一条提示。
+  ///
+  /// 为什么必须做：更新期间应用已经退出，用户在当前进程里看不到任何进度，
+  /// 没有这份回执就只能靠「版本号有没有变」猜；失败（尤其回滚）时更是完全
+  /// 没有反馈（2026-10-27 用户实测反馈）。
+  Future<void> _consumeWindowsUpdateResult(AppPaths paths) async {
+    if (!Platform.isWindows) return;
+    final file = paths.windowsUpdateResultFile;
+    if (!await file.exists()) return;
+    WindowsUpdateOutcome? outcome;
+    try {
+      outcome = WindowsUpdateOutcome.parse(await file.readAsString());
+    } catch (error) {
+      outcome = null;
+      _appLogger.emit(
+        level: LogLevel.warn,
+        category: 'app.update',
+        event: 'windows_update_result_unreadable',
+        outcome: LogOutcome.degraded,
+        code: 'windows_update_result_unreadable',
+        error: error,
+      );
+    }
+    // 一次性事件：先删再提示，避免同一条结果每次启动都弹。
+    await _deleteFileQuietly(file);
+    if (outcome == null) return;
+    final strings = AppStrings.current;
+    _appLogger.emit(
+      level: outcome.status.isSuccess ? LogLevel.info : LogLevel.warn,
+      category: 'app.update',
+      event: 'windows_update_result_consumed',
+      outcome:
+          outcome.status.isSuccess ? LogOutcome.succeeded : LogOutcome.failed,
+      code: outcome.status.isSuccess ? null : outcome.status.logCode,
+      context: <String, Object?>{
+        'status': outcome.status.name,
+        'remoteCode': outcome.code,
+        'toVersion': outcome.toVersion,
+        'logFile': outcome.logFile,
+        'detail': outcome.message,
+      },
+    );
+    _windowsUpdateOutcome = switch (outcome.status) {
+      WindowsUpdateOutcomeStatus.applied => LauncherMessage(
+          strings.windowsUpdateApplied(outcome.toVersion),
+          outcome.status.logCode,
+        ),
+      WindowsUpdateOutcomeStatus.rolledBack => LauncherMessage(
+          strings.windowsUpdateRolledBack,
+          outcome.status.logCode,
+        ),
+      WindowsUpdateOutcomeStatus.failed => LauncherMessage(
+          strings.windowsUpdateFailedAfterRestart,
+          outcome.status.logCode,
+        ),
+      WindowsUpdateOutcomeStatus.pending => LauncherMessage(
+          strings.windowsUpdateInterrupted,
+          outcome.status.logCode,
+        ),
+      // 不认识的 status：只写日志，不弹提示（可能来自更新的脚本版本）。
+      WindowsUpdateOutcomeStatus.unknown => null,
+    };
+  }
+
   /// Writes the save server's document-start shim where the native host reads
   /// it. It sits beside the slots, never inside one: an indexed resource pack
   /// rejects any file its index does not list. A failed fetch must never block
   /// the launch: the game opens without cloud saves and the log records why.
+  ///
+  /// 版本保护（guard）是例外：它缺失就等于把高版本存档交给低版本游戏读，
+  /// 所以这里写入失败必须抛出，让 operation.run 把本次启动记为失败。
   Future<void> _prepareSaveBridge(Directory appRoot) async {
     final file = File(p.join(appRoot.path, syncBridgeFileName));
-    final nativeFile = File(p.join(appRoot.path, nativeTokenFileName));
+    final guardFile = File(p.join(appRoot.path, localSaveGuardFileName));
+    // 旧版在线宿主用的长期令牌文件已无人读取，启动时顺手清掉。
+    await _deleteFileQuietly(
+      File(p.join(appRoot.path, legacyNativeTokenFileName)),
+    );
+    // 版本保护与登录无关：未登录时也要在游戏读 localStorage 之前生效。
+    // 原生宿主只负责把 Dart 生成的文件内联，不再维护一份 Kotlin 实现。
+    final guard = buildLocalSaveGuardScript(_playGameVersion());
+    if (guard.isEmpty) {
+      // 无版本（旧式未索引资源包）无法比较，维持「不写 guard」的语义。
+      // 但旧 guard 必须真的消失：原生只按文件存在与否决定是否内联，
+      // 留下上一个版本的文件会把错的版本上下文塞进这次启动。
+      await _deleteFileQuietly(guardFile);
+      if (await guardFile.exists()) {
+        await _abortForUnusableGuard(guardFile, 'stale_guard_undeletable');
+      }
+    } else {
+      await _writeSaveGuardAtomically(guardFile, guard);
+    }
     final content = await buildSaveBridgeScript();
     if (content.isEmpty) {
       await _deleteFileQuietly(file);
-      await _deleteFileQuietly(nativeFile);
       return;
     }
     try {
-      // 原生心跳/在线代理要用长期设备令牌；页面脚本里只有短时会话令牌。
-      // 分开两个文件，避免「页面过期」把在线会话登记一起弄断。
-      await nativeFile.writeAsString(
-        jsonEncode(<String, Object?>{
-          'token': _appSettings.deviceToken.trim(),
-        }),
-        flush: true,
-      );
-      if (!Platform.isWindows) {
-        await Process.run('chmod', ['600', nativeFile.path]);
-      }
       await file.writeAsString(content, flush: true);
       // 桥文件里有 `token:"pvz_..."` 明文：资源根可能位于用户自选目录，
       // 落地即收紧到 0600（Windows 上 chmod 是空操作）。
@@ -3525,11 +3943,58 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  /// 生成存档桥脚本（`window.__PVZGE_APP__` + shim/sync + 面板）。
+  /// 原子写入版本保护脚本，并在每一步后读回比对。
+  ///
+  /// 原生的 document-start 注入只按文件内容内联，没有第二次校验：磁盘满、
+  /// 安全软件拦截、写到一半被杀都会留下半截 guard，而游戏照样启动。半截
+  /// guard 比没有 guard 更危险（版本标记可能已推进但归档没落盘），所以这里
+  /// 写临时文件 → 读回比对 → 替换目标 → 再读回比对，任一步失败都抛出。
+  Future<void> _writeSaveGuardAtomically(File target, String content) async {
+    final temp = File('${target.path}.tmp');
+    try {
+      await temp.writeAsString(content, flush: true);
+      if (await temp.readAsString() != content) {
+        throw StateError('临时文件读回内容不一致');
+      }
+      // 同目录 rename 是替换操作：目标要么是旧完整文件，要么是新完整文件，
+      // 不会出现「已经截断但还没写完」的中间态。
+      await temp.rename(target.path);
+      if (await target.readAsString() != content) {
+        throw StateError('替换后读回内容不一致');
+      }
+    } catch (error, stackTrace) {
+      await _deleteFileQuietly(temp);
+      await _abortForUnusableGuard(target, 'write_failed', error, stackTrace);
+    }
+  }
+
+  /// guard 无法安全生效时唯一正确的动作：记日志后抛出，阻止本次启动。
+  ///
+  /// 不能只 log 后继续：_prepareSaveBridge 的调用方是 operation.run，抛出的
+  /// 异常会把它记成 game_host_launch_failed，用户看到的是「启动失败」而不是
+  /// 一个悄悄失去版本保护的游戏。
+  Future<Never> _abortForUnusableGuard(
+    File guardFile,
+    String reason, [
+    Object? error,
+    StackTrace? stackTrace,
+  ]) async {
+    _appLogger.emit(
+      level: LogLevel.error,
+      category: 'game.host',
+      event: 'local_save_guard_write_failed',
+      outcome: LogOutcome.failed,
+      code: 'local_save_guard_unusable',
+      error: error,
+      stackTrace: stackTrace,
+      context: <String, Object?>{'reason': reason, 'path': guardFile.path},
+    );
+    throw StateError('本机存档版本保护不可用（$reason），已阻止启动');
+  }
+
   ///
   /// Android 把它交给原生在 document-start 内联；桌面端直接把它交给本地服务器
-  /// 注入页面（在线形态注入反代后的页面）。两条路径同一份脚本，因此
-  /// 「本地/在线」两种形态的存档语义完全一致。
+  /// 注入页面。两条路径同一份脚本，因此两端的存档语义完全一致。
   /// 未登录或未配置服务器时返回空字符串：游戏照常启动，只是没有云存档。
   Future<String> buildSaveBridgeScript() async {
     final base = _appSettings.effectiveServerBaseUrl;
@@ -3719,6 +4184,16 @@ class AppController extends ChangeNotifier {
   Future<void> _updateAppSettings(AppSettings settings) async {
     if (settings.toJson().toString() == _appSettings.toJson().toString()) {
       return;
+    }
+    // 令牌/服务器变化就是换了一套登录上下文：在途请求的响应必须作废。
+    // 用 == 比较而不是原地清空，覆盖「登出后用同一个令牌重新登录」。
+    if (settings.deviceToken != _appSettings.deviceToken ||
+        settings.effectiveServerBaseUrl !=
+            _appSettings.effectiveServerBaseUrl) {
+      _authContextGeneration++;
+      // 换服/换号后旧清单属于上一套资源，不能用来给新账号的在线分区
+      // 取版本；下一次在线查看会重新拉取。
+      _remoteManifest = null;
     }
     final appSettingsStore = _appSettingsStore;
     if (appSettingsStore == null) {

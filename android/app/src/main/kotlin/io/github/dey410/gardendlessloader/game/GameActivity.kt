@@ -47,9 +47,6 @@ class GameActivity : Activity() {
     private var pendingGpImportRequestId: String? = null
     private var pendingGpSelection: PendingGpSelection? = null
     private var returning = false
-    private var tokenRejectionHandled = false
-    /** 在线形态的会话心跳；本地形态为 null。 */
-    private var onlineHeartbeat: OnlineSessionHeartbeat? = null
     @Volatile private var destroyed = false
     /** A ZIP opened from another app during play, handed to the launcher on return. */
     private var incomingZip: Uri? = null
@@ -74,7 +71,11 @@ class GameActivity : Activity() {
             configureWebView()
         } catch (error: Exception) {
             val webViewPackage = WebViewCompat.getCurrentWebViewPackage(this)
-            val code = if (error is WebViewUnsupportedException) "webview_unsupported" else "game_host_launch_failed"
+            val code = when (error) {
+                is WebViewUnsupportedException -> "webview_unsupported"
+                is LocalSaveGuardUnusableException -> "local_save_guard_unusable"
+                else -> "game_host_launch_failed"
+            }
             AppLogStore.emit(
                 source = "android", level = "ERROR", category = "game.host",
                 event = "game_host_launch_finished", outcome = "failed",
@@ -138,22 +139,8 @@ class GameActivity : Activity() {
                     if (crashed) "Android WebView renderer crashed" else "Android WebView renderer exited",
                 )
             },
-            onTokenRejected = {
-                // shouldInterceptRequest 在 WebView 的 IO 线程：退回启动器涉及
-                // startActivity 与 UI，必须切回主线程。
-                runOnUiThread { handleOnlineTokenRejected("resource_proxy") }
-            },
         )
         webView.webChromeClient = GameChromeClient(::openFileChooser)
-        // 在线形态：会话心跳必须在原生维持 —— Dart 侧引擎随 MainActivity
-        // finish 一起销毁，定时器活不过一个 tick。
-        if (session.mode == GameMode.ONLINE) {
-            onlineHeartbeat = OnlineSessionHeartbeat.fromSession(
-                session,
-                onResult = ::logHeartbeatResult,
-                onTokenRejected = { runOnUiThread { handleOnlineTokenRejected("heartbeat") } },
-            )?.also { it.start() }
-        }
         val viewport = GameViewportLayout(this, session.screenFit).apply {
             addView(webView)
         }
@@ -203,8 +190,56 @@ class GameActivity : Activity() {
                     append(it.readText())
                 }
             }
+            appendLocalSaveGuard()
             appendSaveBridge()
         }
+    }
+
+    /**
+     * 本机存档版本保护：降级时不能把高版本 localStorage 交给旧游戏读。
+     *
+     * 逻辑由 Dart 的 `buildLocalSaveGuardScript()` 生成并写到 appRoot，
+     * 原生只负责在游戏脚本之前内联。这样 Android/桌面端不会各自维护一份
+     * 版本保护实现，也不会出现两边行为漂移。
+     */
+    private fun StringBuilder.appendLocalSaveGuard() {
+        val guard = File(session.appRoot, LOCAL_SAVE_GUARD_FILE_NAME)
+        // 缺失/空白/读取失败分三种情况处理：required 时必须失败关闭。
+        // 只 return 会让游戏在无版本保护的情况下加载：降级时高版本 localStorage
+        // 会被低版本引擎改写，下次升级再把损坏内容同步回云端。
+        if (!guard.isFile) {
+            if (session.localSaveGuardRequired) {
+                failUnusableGuard("missing")
+            }
+            return
+        }
+        val script = runCatching { guard.readText() }.getOrNull()
+        if (script.isNullOrBlank()) {
+            if (session.localSaveGuardRequired) {
+                failUnusableGuard("empty_or_unreadable")
+            }
+            return
+        }
+        append('\n')
+        append(sanitizeInlineScript(script))
+    }
+
+    /**
+     * 版本保护无法生效时的唯一安全出口：记明确事件后抛出，由 onCreate 的
+     * 统一失败路径写退出结果并回到启动器。异常向上抛（而不是在这里 finish）
+     * 是为了与现有 game_host_launch_failed 处理共用同一套收尾逻辑。
+     */
+    private fun failUnusableGuard(reason: String): Nothing {
+        AppLogStore.emit(
+            source = "android", level = "ERROR", category = "game.host",
+            event = "local_save_guard_unusable", outcome = "failed",
+            code = "local_save_guard_unusable",
+            gameSessionId = session.sessionId,
+            context = mapOf("reason" to reason),
+        )
+        throw LocalSaveGuardUnusableException(
+            "本机存档版本保护不可用（$reason），已阻止启动",
+        )
     }
 
     /**
@@ -511,7 +546,6 @@ class GameActivity : Activity() {
             event = "game_activity_$event",
             outcome = "observed",
             gameSessionId = session.sessionId,
-            context = mapOf("mode" to session.mode.wireName),
         )
     }
 
@@ -523,56 +557,6 @@ class GameActivity : Activity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) enterImmersiveMode()
-    }
-
-    /**
-     * 在线心跳结果埋点。真机验收的核心证据：这条日志有 statusCode=200，
-     * 服务端的 `online/status` 就应该 >0；若是 401，说明令牌已失效。
-     */
-    private fun logHeartbeatResult(
-        phase: String,
-        statusCode: Int,
-        durationMs: Long,
-        error: Throwable?,
-    ) {
-        val ok = statusCode in 200..299
-        AppLogStore.emit(
-            source = "android",
-            level = if (ok) "INFO" else "WARN",
-            category = "game.heartbeat",
-            event = if (ok) "heartbeat_sent" else "heartbeat_failed",
-            outcome = if (ok) "succeeded" else "failed",
-            code = when {
-                error != null -> "heartbeat_network_error"
-                ok -> null
-                else -> "heartbeat_http_$statusCode"
-            },
-            gameSessionId = if (::session.isInitialized) session.sessionId else null,
-            durationMs = durationMs,
-            error = error,
-            context = mapOf("phase" to phase, "statusCode" to statusCode),
-        )
-    }
-
-    /**
-     * 在线令牌被服务端拒绝（401/403）。资源代理和心跳都可能先发现。
-     * 令牌失效后所有在线资源都会 401，游戏实际已不可用：退回启动器并
-     * 用 [GameExitReason.TOKEN_REJECTED] 让 Dart 侧清登录态。
-     */
-    private fun handleOnlineTokenRejected(source: String) {
-        if (tokenRejectionHandled || returning || !::session.isInitialized) return
-        tokenRejectionHandled = true
-        AppLogStore.emit(
-            source = "android",
-            level = "WARN",
-            category = "game.heartbeat",
-            event = "online_token_rejected",
-            outcome = "failed",
-            code = "save_token_rejected",
-            gameSessionId = session.sessionId,
-            context = mapOf("source" to source),
-        )
-        returnToLauncher(GameExitReason.TOKEN_REJECTED, "登录状态已失效，请重新登录")
     }
 
     fun returnToLauncher(reason: GameExitReason, message: String?) {
@@ -610,9 +594,6 @@ class GameActivity : Activity() {
     override fun onDestroy() {
         running = false
         destroyed = true
-        // 先注销在线会话，再拆 WebView：服务端据此立即允许换资源
-        onlineHeartbeat?.stop()
-        onlineHeartbeat = null
         pendingExport = null
         pendingGpSelection = null
         pendingGpImportRequestId = null
@@ -904,9 +885,8 @@ class GameActivity : Activity() {
 
         /** Save-server shim the launcher writes into the resource slot. */
         const val SAVE_BRIDGE_FILE_NAME = "__sync_app.js"
-
-        /** 原生宿主专用凭据文件名（0600，不注入页面）。与 Dart 侧常量保持一致。 */
-        const val NATIVE_TOKEN_FILE_NAME = "__sync_native_token"
+        // 由 Dart 生成的本机存档版本保护脚本，与登录无关
+        const val LOCAL_SAVE_GUARD_FILE_NAME = "__local_save_guard.js"
 
         /** True while a game host is open; see [LaunchRouterActivity]. */
         @Volatile
@@ -928,3 +908,9 @@ private fun File.isSelectionSymbolicLink(): Boolean = runCatching {
 
 /** The System WebView lacks a feature the GameHost needs; updating it fixes the launch. */
 private class WebViewUnsupportedException(message: String) : IllegalStateException(message)
+
+/**
+ * 存档版本保护脚本无法加载。required 时抛出，让本次启动失败关闭，
+ * 而不是把高版本存档交给可能降级的游戏读。
+ */
+private class LocalSaveGuardUnusableException(message: String) : IllegalStateException(message)

@@ -107,13 +107,15 @@ class _LoaderPanel extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             strings.personalBuildNotice,
-            style: TextStyle(color: palette.inkMuted, fontSize: 12.5, height: 1.5),
+            style:
+                TextStyle(color: palette.inkMuted, fontSize: 12.5, height: 1.5),
           ),
           const SizedBox(height: 14),
           if (controller.cloudServerConfigured) ...[
             Text(
               strings.saveManagerHint,
-              style: TextStyle(color: palette.inkMuted, fontSize: 12.5, height: 1.5),
+              style: TextStyle(
+                  color: palette.inkMuted, fontSize: 12.5, height: 1.5),
             ),
             const SizedBox(height: 8),
             GardenButton(
@@ -142,7 +144,8 @@ class _LoaderPanel extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               strings.upstreamSignatureWarning,
-              style: TextStyle(color: palette.danger, fontSize: 12.5, height: 1.5),
+              style:
+                  TextStyle(color: palette.danger, fontSize: 12.5, height: 1.5),
             ),
             if (update.releaseName.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -508,7 +511,7 @@ class _WindowsUpdatePanel extends StatelessWidget {
       AppUpdatePhase.downloading => (strings.windowsUpdateDownloading, null),
       AppUpdatePhase.verifying => (strings.windowsUpdateVerifying, null),
       AppUpdatePhase.ready => (strings.windowsUpdateReadyShort, palette.accent),
-      AppUpdatePhase.installing => (strings.appUpdateInstalling, null),
+      AppUpdatePhase.installing => (strings.windowsUpdateApplying, null),
       AppUpdatePhase.failed => (strings.appUpdateFailed, palette.danger),
     };
     final hintStyle = TextStyle(
@@ -612,8 +615,9 @@ class _WindowsUpdatePanel extends StatelessWidget {
                 tone: GardenButtonTone.ghost,
                 compact: true,
                 busy: status.phase == AppUpdatePhase.checking,
-                onPressed:
-                    status.active ? null : () => controller.checkWindowsUpdate(),
+                onPressed: status.active
+                    ? null
+                    : () => controller.checkWindowsUpdate(),
               ),
               if (status.phase == AppUpdatePhase.downloading)
                 GardenButton(

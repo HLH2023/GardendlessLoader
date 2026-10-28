@@ -29,6 +29,12 @@ public struct GameSession: Codable, Equatable {
   public let watermarkEnabled: Bool
   public let autoCollectSunEnabled: Bool
   public let detailedAudioDiagnosticsEnabled: Bool
+  /// 本次启动是否必须成功加载本机存档版本保护脚本。
+  ///
+  /// 有游戏版本时 Dart 会生成并原子写入 `__local_save_guard.js`，原生宿主
+  /// 必须把「文件缺失/空白/读取失败」当成启动失败；无版本（旧式未索引资源
+  /// 包）为 false，允许没有 guard 启动。旧 session JSON 缺该字段时默认 false。
+  public let localSaveGuardRequired: Bool
   /// Share of the device pixel ratio the game canvas renders at; nil keeps
   /// the device's own ratio.
   public let renderScale: Double?
@@ -57,6 +63,7 @@ public struct GameSession: Codable, Equatable {
     watermarkEnabled: Bool,
     autoCollectSunEnabled: Bool,
     detailedAudioDiagnosticsEnabled: Bool = false,
+    localSaveGuardRequired: Bool = false,
     renderScale: Double? = nil,
     screenFit: GameScreenFit = .balanced,
     touchDiagnosticsEnabled: Bool = false,
@@ -76,6 +83,7 @@ public struct GameSession: Codable, Equatable {
     self.watermarkEnabled = watermarkEnabled
     self.autoCollectSunEnabled = autoCollectSunEnabled
     self.detailedAudioDiagnosticsEnabled = detailedAudioDiagnosticsEnabled
+    self.localSaveGuardRequired = localSaveGuardRequired
     self.renderScale = renderScale
     self.screenFit = screenFit
     self.touchDiagnosticsEnabled = touchDiagnosticsEnabled
@@ -132,6 +140,8 @@ public enum GameSessionDecoder {
       autoCollectSunEnabled: try requiredBool(json, "autoCollectSunEnabled"),
       detailedAudioDiagnosticsEnabled:
         json["detailedAudioDiagnosticsEnabled"] as? Bool ?? false,
+      // 旧 session JSON 没有该字段：默认 false，宿主保持原行为。
+      localSaveGuardRequired: json["localSaveGuardRequired"] as? Bool ?? false,
       renderScale: renderScale,
       screenFit: screenFit,
       touchDiagnosticsEnabled: json["touchDiagnosticsEnabled"] as? Bool ?? false,

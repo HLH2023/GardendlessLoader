@@ -5,7 +5,7 @@ import '../../l10n/app_strings.dart';
 import '../launcher_actions.dart';
 import '../theme/garden_theme.dart';
 import '../widgets/garden_widgets.dart';
-import 'play_mode_card.dart';
+import 'account_card.dart';
 
 class PlayPage extends StatefulWidget {
   const PlayPage({
@@ -50,7 +50,7 @@ class _PlayPageState extends State<PlayPage> {
     );
     return LayoutBuilder(
       builder: (context, constraints) {
-        final modeCard = PlayModeCard(
+        final accountCard = AccountCard(
           controller: controller,
           actions: widget.actions,
           compact: widget.compact,
@@ -62,7 +62,7 @@ class _PlayPageState extends State<PlayPage> {
               SizedBox(height: gap),
               actionBar,
               SizedBox(height: gap),
-              modeCard,
+              accountCard,
             ],
           );
         }
@@ -87,10 +87,10 @@ class _PlayPageState extends State<PlayPage> {
                     ],
                   ),
                   SizedBox(height: gap),
-                  // 形态切换 + 全局账号：两种形态共用同一存档通路，登录态也只有一份
+                  // 全局账号：本地资源包启动路径固定，登录只影响云端能力
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 640),
-                    child: modeCard,
+                    child: accountCard,
                   ),
                   const SizedBox(height: 8),
                 ],

@@ -435,6 +435,77 @@ class RemoteResourceService {
     );
   }
 
+  /// 单个玩家的历史版本。与整包 `/history` 分开：回滚 A 不会动 B。
+  Future<List<CloudSaveVersion>> fetchProfileHistory({
+    required String token,
+    required String baseUrl,
+    required String user,
+    required String profileId,
+    String gameVersion = '',
+    int limit = saveServerHistoryLimit,
+    Duration timeout = saveServerRequestTimeout,
+  }) async {
+    final uri = _resolve(baseUrl, saveProfileHistoryPath).replace(
+      queryParameters: <String, String>{
+        'user': user,
+        'profileId': profileId,
+        'limit': '$limit',
+        if (gameVersion.trim().isNotEmpty) 'gameVersion': gameVersion.trim(),
+      },
+    );
+    final body = await _getText(
+      uri,
+      token: token,
+      timeout: timeout,
+      maxBytes: saveServerSavesMaxBytes,
+      code: 'save_history_unavailable',
+    );
+    return _parseJson<List<CloudSaveVersion>>(
+      body,
+      code: 'save_history_invalid',
+      parse: (json) {
+        final raw = json['versions'];
+        if (raw is! List) {
+          throw const FormatException('profile history has no versions array');
+        }
+        return raw
+            .whereType<Map>()
+            .map((item) => CloudSaveVersion.fromJson(
+                  item.map((key, value) => MapEntry(key.toString(), value)),
+                ))
+            .toList(growable: false);
+      },
+    );
+  }
+
+  /// 只回滚一个玩家的历史版本；服务端会给该玩家当前版本留快照。
+  Future<void> restoreProfileVersion({
+    required String token,
+    required String baseUrl,
+    required String user,
+    required String profileId,
+    required int ts,
+    String name = '',
+    String gameVersion = '',
+    Duration timeout = saveServerRequestTimeout,
+  }) async {
+    final body = <String, Object?>{
+      'user': user,
+      'profileId': profileId,
+      'ts': ts,
+      if (gameVersion.trim().isNotEmpty) 'gameVersion': gameVersion.trim(),
+    };
+    if (name.isNotEmpty) body['name'] = name;
+    await _postJson(
+      _resolve(baseUrl, saveProfileRestorePath),
+      token: token,
+      timeout: timeout,
+      maxBytes: saveServerSavesMaxBytes,
+      code: 'save_restore_failed',
+      body: body,
+    );
+  }
+
   /// The in-game save panel (floating button) served over the same Bearer
   /// channel as the sync bridge; it opens the must-authenticated save manager
   /// page inside the game view.
@@ -787,10 +858,8 @@ class RemoteResourceService {
         request.contentLength = payload.length;
         request.add(payload);
         final response = await request.close();
-        final text = await response
-            .transform(utf8.decoder)
-            .join()
-            .timeout(timeout);
+        final text =
+            await response.transform(utf8.decoder).join().timeout(timeout);
         if (response.statusCode != HttpStatus.ok) {
           throw _statusFailure(response.statusCode, code);
         }

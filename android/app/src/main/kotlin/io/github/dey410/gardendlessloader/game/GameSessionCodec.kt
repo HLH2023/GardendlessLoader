@@ -18,28 +18,11 @@ enum class GameScreenFit(val wireName: String) {
     STRETCH("stretch"),
 }
 
-/** 游玩形态：本地资源包 / 在线（直接从服务器拉游戏页）。 */
-enum class GameMode(val wireName: String) {
-    LOCAL("local"),
-    ONLINE("online"),
-    ;
-
-    companion object {
-        fun fromWireName(value: String?): GameMode =
-            entries.firstOrNull { it.wireName == value } ?: LOCAL
-    }
-}
-
 data class NativeGameSession(
     val sessionId: String,
     val resourceRoot: String,
     /** 启动器数据目录：存档桥文件放在这里（与资源槽分开，见 appendSaveBridge）。 */
     val appRootPath: String,
-    val mode: GameMode,
-    /** 存档按游戏版本隔离；在线会话心跳也带上它，服务端据此判断换版本是否安全。 */
-    val gameVersion: String = "",
-    /** 在线会话心跳的设备标识（与 Dart 侧一致，便于 enter/leave 配对）。 */
-    val deviceId: String = "",
     val origin: String,
     val entryUrl: String,
     val activationGeneration: Long,
@@ -49,6 +32,12 @@ data class NativeGameSession(
     val watermarkEnabled: Boolean,
     val autoCollectSunEnabled: Boolean,
     val detailedAudioDiagnosticsEnabled: Boolean = false,
+    /**
+     * 本次启动是否必须加载本机存档版本保护脚本。Dart 在有游戏版本时置 true，
+     * 此时 guard 缺失/空白/读取失败必须失败关闭，不能无保护地打开游戏。
+     * 旧 session JSON 没有该字段，默认 false（向后兼容旧启动器）。
+     */
+    val localSaveGuardRequired: Boolean = false,
     val renderScale: Double? = null,
     val screenFit: GameScreenFit = GameScreenFit.BALANCED,
     /** Records the touch adapter's trace into the logs. */
@@ -72,31 +61,11 @@ object GameSessionCodec {
         val json = JSONObject(raw)
         require(json.optInt("schemaVersion") == 1) { "Unsupported game session schema" }
         require(json.getString("platform") == "android") { "Game session platform mismatch" }
-        val mode = GameMode.fromWireName(json.optionalString("mode"))
         val origin = json.getString("origin")
         val entryUrl = json.getString("entryUrl")
-        when (mode) {
-            GameMode.LOCAL -> {
-                require(origin == ORIGIN) { "Game session origin mismatch" }
-                require(entryUrl.startsWith("$ORIGIN/")) { "Entry URL escaped the game origin" }
-            }
-            GameMode.ONLINE -> {
-                // 在线形态只允许 https，且入口必须落在同一 origin 的
-                // /_save/online/ 路由下（Bearer 鉴权 + 无脚本注入的那条）。
-                require(origin.startsWith("https://")) { "Online origin must be https" }
-                val host = runCatching { java.net.URI(origin).host }.getOrNull()
-                require(!host.isNullOrBlank() && isValidRemoteHost(host.lowercase())) {
-                    "Invalid online origin"
-                }
-                require(entryUrl.startsWith("$origin/")) { "Entry URL escaped the online origin" }
-                require(entryUrl.contains("/_save/online/")) { "Online entry must use the app online route" }
-            }
-        }
-        val resourceRoot = if (mode == GameMode.ONLINE) {
-            json.optString("resourceRoot", "")
-        } else {
-            json.requiredString("resourceRoot")
-        }
+        require(origin == ORIGIN) { "Game session origin mismatch" }
+        require(entryUrl.startsWith("$ORIGIN/")) { "Entry URL escaped the game origin" }
+        val resourceRoot = json.requiredString("resourceRoot")
         val appRootPath = json.optionalString("appRoot")?.takeIf { it.isNotBlank() }
             ?: java.io.File(resourceRoot).parentFile?.absolutePath
             ?: throw IllegalArgumentException("Game session has no app root")
@@ -107,9 +76,6 @@ object GameSessionCodec {
             sessionId = json.requiredString("sessionId"),
             resourceRoot = resourceRoot,
             appRootPath = appRootPath,
-            mode = mode,
-            gameVersion = json.optionalString("gameVersion")?.trim().orEmpty(),
-            deviceId = json.optionalString("deviceId")?.trim().orEmpty(),
             origin = origin,
             entryUrl = entryUrl,
             activationGeneration = json.getLong("activationGeneration"),
@@ -119,6 +85,7 @@ object GameSessionCodec {
             watermarkEnabled = json.getBoolean("watermarkEnabled"),
             autoCollectSunEnabled = json.getBoolean("autoCollectSunEnabled"),
             detailedAudioDiagnosticsEnabled = json.optBoolean("detailedAudioDiagnosticsEnabled", false),
+            localSaveGuardRequired = json.optBoolean("localSaveGuardRequired", false),
             renderScale = if (json.isNull("renderScale")) null else {
                 json.getDouble("renderScale").also {
                     require(it > 0) { "Invalid render scale" }

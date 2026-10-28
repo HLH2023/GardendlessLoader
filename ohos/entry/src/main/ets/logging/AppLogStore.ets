@@ -310,6 +310,8 @@ export class AppLogStore {
         this.segment += 1;
         suffix = this.segment.toString().padStart(3, '0');
         path = `${this.logsDirectory}/app-${this.appSessionId}-${suffix}.jsonl`;
+        // 换段时按总量清理：只在启动时清一次的话，长时间运行会无限增长。
+        this.cleanup();
       }
     } catch (_error) {}
     return path;

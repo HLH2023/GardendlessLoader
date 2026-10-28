@@ -57,10 +57,16 @@ enum ImportPhase {
 typedef ImportProgressCallback = void Function(ImportProgress progress);
 
 class AppPaths {
-  AppPaths({required this.root, required this.manifestFile});
+  AppPaths(
+      {required this.root, required this.manifestFile, Directory? downloads})
+      : _downloads = downloads;
 
   final Directory root;
   final File manifestFile;
+
+  /// 桌面端由 [AppPathsService] 解析成「加载器目录下的 downloads」；
+  /// 移动端与不可写的安装目录仍是 `<资源根>/downloads`。
+  final Directory? _downloads;
 
   File get appSettingsFile =>
       File('${root.path}${Platform.pathSeparator}app_settings.json');
@@ -77,8 +83,17 @@ class AppPaths {
       Directory('${root.path}${Platform.pathSeparator}gp-next');
 
   /// Where the save server's resource ZIPs are downloaded and resumed from.
+  ///
+  /// 桌面端默认放在加载器自己的目录里（`<exe 所在目录>/downloads`），
+  /// 资源包、更新包和 exe 在一起，用户能找到也好清理；安装目录不可写
+  /// （Program Files 未提权、只读介质）时退回资源根下的 `downloads`。
   Directory get downloadsDir =>
-      Directory('${root.path}${Platform.pathSeparator}downloads');
+      _downloads ?? Directory('${root.path}${Platform.pathSeparator}downloads');
+
+  /// Windows 更新的结果回执：Dart 退出前写 pending，覆盖脚本写完终态，
+  /// 下一次启动读取后删除（用于「更新成功/已回滚/失败」的提示）。
+  File get windowsUpdateResultFile =>
+      File('${root.path}${Platform.pathSeparator}windows_update_result.json');
 
   Directory get legacyImportDir =>
       Directory('${root.path}${Platform.pathSeparator}import');

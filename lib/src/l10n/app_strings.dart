@@ -63,24 +63,7 @@ class AppStrings {
 
   String _t(String zh, String en) => isChinese ? zh : en;
 
-  // 游玩形态 / 全局登录
-  String get playModeTitle => _t('游玩形态', 'Play mode');
-  String get playModeLocal => _t('本地（离线）', 'Local (offline)');
-  String get playModeOnline => _t('在线', 'Online');
-  String get playModeLocalHint => _t(
-        '使用已下载的资源包，不联网也能玩；有网时存档照常同步。',
-        'Plays the downloaded resource pack, works without a network; saves still sync when online.',
-      );
-  String get playModeOnlineHint => _t(
-        '不下载资源包，由启动器反代服务器上的游戏页；需要联网。',
-        'No local resource pack: the launcher proxies the game straight from the server. Requires a network.',
-      );
-  String get playModeLocalNeedsResource =>
-      _t('本地游玩需要先下载/导入资源包', 'Local play needs a resource pack first');
-  String get playModeOnlineNeedsServer =>
-      _t('在线游玩需要先配置服务器地址', 'Online play needs a server address');
-  String get playModeDesktopOnly =>
-      _t('在线游玩目前仅桌面端可用', 'Online play is currently desktop only');
+  // 全局登录
   String get cloudSavesOffHint =>
       _t('未登录：本次游戏不会同步存档', 'Not signed in: this session will not sync saves');
   String get accountTitle => _t('账号', 'Account');
@@ -100,8 +83,8 @@ class AppStrings {
             'copy it below. The token stays on this device.',
       );
   String get accountHint => _t(
-        '登录后，云存档、资源下载、在线游玩与存档管理共用同一身份。',
-        'One sign-in covers cloud saves, resource downloads, online play and save management.',
+        '登录后，云存档、资源下载与存档管理共用同一身份。',
+        'One sign-in covers cloud saves, resource downloads and save management.',
       );
 
   // 资源存储位置（Android + 桌面端通用）
@@ -128,6 +111,11 @@ class AppStrings {
       );
   String get storageConfirmMigrate => _t('开始迁移', 'Migrate');
   String get storageCancel => _t('取消', 'Cancel');
+
+  // 桌面游戏页工具栏：全屏按钮。游戏自己的设置里也有全屏开关，两条路
+  // 最终都落到同一个窗口动作（见 WindowService）。
+  String get enterFullscreen => _t('全屏', 'Fullscreen');
+  String get exitFullscreen => _t('退出全屏', 'Exit fullscreen');
   String get storageSwitched => _t('存储位置已切换', 'Storage location switched');
   String get storageValidating => _t('正在校验…', 'Checking…');
   String get storagePathHint => _t('绝对路径', 'Absolute path');
@@ -294,8 +282,8 @@ class AppStrings {
   String get personalBuildTag => _t('个人构建', 'Personal build');
   String get personalBuildNotice => _t(
         '这是个人定制构建，版本号带 -hlh.N 后缀，与上游官方版区分。'
-        '升级请用下方「应用内更新」，它只认个人构建的发布记录；'
-        '「上游最新」仅用于对照上游官方基线。',
+            '升级请用下方「应用内更新」，它只认个人构建的发布记录；'
+            '「上游最新」仅用于对照上游官方基线。',
         'This is a personal build: the -hlh.N suffix separates it from the '
             'upstream release. Upgrade through "In-app update" below, which '
             'tracks personal builds only; "Upstream" is shown purely as a '
@@ -350,10 +338,11 @@ class AppStrings {
             'belongs to this account.',
       );
   String get savesRestore => _t('回滚', 'Roll back');
-  String get savesRestoreConfirmTitle => _t('回滚云端存档？', 'Roll back the cloud save?');
+  String get savesRestoreConfirmTitle =>
+      _t('回滚云端存档？', 'Roll back the cloud save?');
   String savesRestoreConfirmBody(String key) => _t(
         '云端的「$key」会被替换成所选的历史版本，当前版本会先留一份快照。'
-        '回滚后请退出游戏重新进入 —— 本机这份进度会被云端覆盖，否则它会把回滚结果写回去。',
+            '回滚后请退出游戏重新进入 —— 本机这份进度会被云端覆盖，否则它会把回滚结果写回去。',
         'The cloud copy of "$key" is replaced with the selected version, and '
             'the current one is snapshotted first. Close and reopen the game '
             'afterwards: this device\'s progress is overwritten by the cloud '
@@ -368,10 +357,45 @@ class AppStrings {
   String get savesWrittenBy => _t('最后写入', 'Last written by');
   String get savesUploadHint => _t(
         '自动上传只在游戏运行中发生（约 3 秒防抖）；启动器不会上传本机数据。'
-        '游戏内右下角「存档」可打开与 Web 端一致的存档管理界面。',
+            '游戏内右下角「存档」可打开与 Web 端一致的存档管理界面。',
         'Uploads only happen while the game is running (3 s debounce); the '
             'launcher never uploads this device. The in-game "Saves" button '
             'opens the same manager as the web client.',
+      );
+  String get savesViewLocal => _t('本地资源版本', 'Local resource version');
+  String get savesViewOnline => _t('在线版本', 'Online version');
+  String savesViewVersion(String version) =>
+      version.isEmpty ? _t('未分区（legacy）', 'Legacy (unversioned)') : version;
+  String get savesViewHint => _t(
+        '默认查看本地资源版本。切换只影响本页查看的云端分区，不改变正在运行或下次启动的游戏版本。',
+        'Shows the local resource version by default. Switching only changes '
+            'which cloud partition this page shows; it does not change the '
+            'running or next game version.',
+      );
+  String get savesLocalResourceMissing => _t(
+        '本地还没有导入游戏资源，确定不了本地存档版本。先导入资源包，或切到「在线版本」查看。',
+        'No local game resources yet, so the local save version is unknown. '
+            'Import a resource pack or switch to the online version.',
+      );
+  String get savesOnlineVersionUnavailable => _t(
+        '拿不到服务器当前资源版本，暂时无法查看在线存档。检查网络后刷新。',
+        'Could not get the server resource version, so online saves are '
+            'unavailable. Check the network and refresh.',
+      );
+  String get savesPlayers => _t('玩家数据', 'Players');
+  String get savesSharedData => _t('共享数据', 'Shared data');
+  String get savesUid => _t('账号 ID', 'Account ID');
+  String get savesProfileInherited =>
+      _t('从旧版本继承', 'Inherited from older version');
+  String get savesProfileHistoryEmpty =>
+      _t('这份玩家数据还没有历史版本。', 'No versions for this player yet.');
+  String savesPlayerCount(int count) =>
+      _t('$count 份玩家数据', count == 1 ? '1 player' : '$count players');
+  String savesRestoreProfileConfirmBody(String name) => _t(
+        '只把玩家「$name」的云端数据替换成所选版本，其它玩家不受影响。当前版本会先留一份快照。回滚后请退出游戏重新进入。',
+        'Only the cloud data for "$name" is replaced with the selected '
+            'version; other players are untouched. The current version is '
+            'snapshotted first. Close and reopen the game afterwards.',
       );
   String get savesPlayer => _t('玩家', 'Player');
   String get savesCoin => _t('金币', 'Coins');
@@ -465,10 +489,12 @@ class AppStrings {
   String get windowsUpdateOpenFolder => _t('打开下载目录', 'Open download folder');
   String get windowsUpdateApply =>
       _t('退出并自动更新', 'Quit and update automatically');
-  String get windowsUpdateApplyTitle => _t('覆盖安装目录？', 'Replace the install folder?');
+  String get windowsUpdateApplyTitle =>
+      _t('覆盖安装目录？', 'Replace the install folder?');
   String get windowsUpdateApplyMessage => _t(
         '应用会退出，由外部脚本备份并覆盖当前安装目录，然后重新启动。'
-            '复制失败会自动回滚到旧版本；更新日志在系统临时目录。',
+            '复制失败会自动回滚到旧版本；重启后会在首页提示更新结果，'
+            '更新日志在系统临时目录。',
         'The app will quit; an external script backs up and replaces the install '
             'folder, then starts it again. A failed copy rolls back to the old '
             'version; the log stays in the system temp folder.',
@@ -482,8 +508,7 @@ class AppStrings {
         'Downloaded and SHA-256 verified. Quit the app, then extract it over '
             'the install folder.',
       );
-  String get windowsUpdateUpToDate =>
-      _t('已是最新构建', 'Already the latest build');
+  String get windowsUpdateUpToDate => _t('已是最新构建', 'Already the latest build');
   String get windowsUpdateNotSignedIn => _t(
         '请先登录云存档服务器，再检查桌面端更新。',
         'Sign in to the save server before checking for desktop updates.',
@@ -494,6 +519,34 @@ class AppStrings {
       );
   String windowsUpdateError(String? code, String? detail) =>
       _t('更新失败（$code）：$detail', 'Update failed ($code): $detail');
+
+  // 更新是「退出应用 → 外部脚本覆盖 → 自动重启」，这几条是重启后读回执时
+  // 用的提示：没有它们，用户点完「退出并自动更新」就只能看到一个窗口消失。
+  String get windowsUpdateApplying => _t(
+        '正在退出并安装更新…',
+        'Quitting to install the update…',
+      );
+  String windowsUpdateApplied(String version) {
+    final target = version.isEmpty ? '' : ' $version';
+    return _t('已更新到$target', 'Updated to$target');
+  }
+
+  String get windowsUpdateRolledBack => _t(
+        '更新失败，已回滚到原版本。详情见「日志」页。',
+        'The update failed and was rolled back. See the Logs page for details.',
+      );
+  String get windowsUpdateFailedAfterRestart => _t(
+        '更新没有完成，安装目录可能不完整；请重新下载更新或手动解压更新包。',
+        'The update did not finish; the install folder may be incomplete. '
+            'Download it again or extract the package manually.',
+      );
+  String get windowsUpdateInterrupted => _t(
+        '上次更新没有执行完。如果你刚刚点了「退出并自动更新」，等它自动重启即可；'
+            '否则请重新点一次，或检查杀毒软件是否拦截了 PowerShell。',
+        'The last update did not finish. If you just chose "Quit and update", '
+            'wait for the automatic restart; otherwise run it again, or check '
+            'whether antivirus blocked PowerShell.',
+      );
 
   String appUpdateError(String? code, String? detail) {
     final extra = detail == null || detail.trim().isEmpty ? '' : detail;

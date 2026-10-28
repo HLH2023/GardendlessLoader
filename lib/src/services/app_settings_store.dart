@@ -2,23 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../constants.dart';
-import '../game_host/game_host.dart';
-
-/// 两种游玩形态，存档通路完全一致（同一个本地服务器 + 同一份存档桥）。
-enum PlayMode {
-  /// 本地资源包：资源已下载并解包到磁盘，完全离线可玩。
-  local,
-
-  /// 在线：启动器反代服务器上的游戏页，不占本地磁盘。
-  online;
-
-  static PlayMode fromName(Object? value) {
-    return PlayMode.values.firstWhere(
-      (mode) => mode.name == value,
-      orElse: () => PlayMode.local,
-    );
-  }
-}
+import '../game_host/game_host_platform.dart';
 
 enum ThemePreference {
   system,
@@ -83,10 +67,13 @@ class AppSettings {
     this.serverBaseUrl = kDefaultServerBase,
     this.deviceToken = '',
     this.deviceAccount = '',
-    this.playMode = PlayMode.local,
+    this.desktopLocalPort = 0,
   });
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
+    // 旧版本的 `playMode`（local/online）与 `desktopOnlinePort` 已废弃：
+    // 显式忽略这两个字段，其余设置照常读出。在线游玩删除后所有用户都按
+    // 本地资源包游玩，旧 JSON 里的 online 绝不能把启动器带回不存在的路径。
     return AppSettings(
       watermarkEnabled: json['watermarkEnabled'] as bool? ?? true,
       quickLaunchEnabled: json['quickLaunchEnabled'] as bool? ?? false,
@@ -104,9 +91,9 @@ class AppSettings {
           json['touchDiagnosticsEnabled'] as bool? ?? false,
       gestureHintShown: json['gestureHintShown'] as bool? ?? false,
       serverBaseUrl: _readBaseUrl(json['serverBaseUrl']),
-      playMode: PlayMode.fromName(json['playMode']),
       deviceToken: (json['deviceToken'] as String? ?? '').trim(),
       deviceAccount: (json['deviceAccount'] as String? ?? '').trim(),
+      desktopLocalPort: _readPort(json['desktopLocalPort']),
     );
   }
 
@@ -148,9 +135,11 @@ class AppSettings {
   /// until the identity has been verified. Never a secret.
   final String deviceAccount;
 
-  /// 游玩形态：本地资源包（离线）或在线（由启动器反代服务器游戏页）。
-  /// 两种形态走同一个本地服务器与同一份存档桥，存档语义保持一致。
-  final PlayMode playMode;
+  /// 桌面端本地资源服务器的固定端口（0=尚未分配）。
+  /// 为什么必须持久化：WebView 的 localStorage 按 origin 隔离，origin 里含
+  /// 端口；随机端口会让每次启动都是一套新存储 —— 重启后进度「消失」。
+  /// 首次分配后固定复用，不能随便改，否则等于换掉存档所在的 origin。
+  final int desktopLocalPort;
 
   /// The server this app talks to: the value saved in settings, else the one
   /// compiled in. Empty when neither is a usable https URL.
@@ -180,7 +169,7 @@ class AppSettings {
     String? serverBaseUrl,
     String? deviceToken,
     String? deviceAccount,
-    PlayMode? playMode,
+    int? desktopLocalPort,
   }) {
     return AppSettings(
       watermarkEnabled: watermarkEnabled ?? this.watermarkEnabled,
@@ -200,7 +189,7 @@ class AppSettings {
       serverBaseUrl: serverBaseUrl ?? this.serverBaseUrl,
       deviceToken: deviceToken ?? this.deviceToken,
       deviceAccount: deviceAccount ?? this.deviceAccount,
-      playMode: playMode ?? this.playMode,
+      desktopLocalPort: desktopLocalPort ?? this.desktopLocalPort,
     );
   }
 
@@ -220,12 +209,17 @@ class AppSettings {
         'serverBaseUrl': serverBaseUrl,
         'deviceToken': deviceToken,
         'deviceAccount': deviceAccount,
-        'playMode': playMode.name,
+        'desktopLocalPort': desktopLocalPort,
       };
 }
 
 /// Settings kept before the save server was configurable have no base URL;
 /// a blank value stays blank so the compiled-in default can apply.
+int _readPort(Object? value) {
+  final port = value is int ? value : int.tryParse('$value');
+  return port != null && port > 0 && port <= 65535 ? port : 0;
+}
+
 String _readBaseUrl(Object? value) {
   return value is String ? value.trim() : '';
 }

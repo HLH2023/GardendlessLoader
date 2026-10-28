@@ -523,9 +523,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openExternalUrl(String url) async {
-    await const MethodChannel(
-      'io.github.dey410.gardendlessloader/external_browser',
-    ).invokeMethod<void>('open', <String, Object?>{'url': url});
+    // 桌面端没有 external_browser 通道，分支收在 ExternalUrlService 里；
+    // 这里只负责转交，避免 UI 层再出现一处平台判断。
+    await _controller.openExternalUrl(url);
   }
 
   Future<void> _startGame() async {

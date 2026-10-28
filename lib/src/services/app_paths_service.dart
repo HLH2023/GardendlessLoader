@@ -17,7 +17,8 @@ class AppPathsService {
   StorageRootService get storage => _storageRoot;
 
   /// 解析资源根目录：用户配置的位置优先，不可用时退回平台默认。
-  Future<({AppPaths paths, bool fromConfigured})> ensureInitializedWithSource() async {
+  Future<({AppPaths paths, bool fromConfigured})>
+      ensureInitializedWithSource() async {
     final resolved = await _storageRoot.resolveRoot();
     final paths = _buildPaths(resolved.root);
     await _createPaths(paths);
@@ -40,7 +41,35 @@ class AppPathsService {
     return AppPaths(
       root: root,
       manifestFile: File(p.join(root.path, 'manifest.json')),
+      downloads: _downloadsDirectory(root),
     );
+  }
+
+  /// 下载目录：桌面端默认放到加载器自己的文件夹里（`<exe目录>/downloads`）。
+  ///
+  /// 为什么不跟着资源根走：资源根是用户可选的（很多人直接指向一个
+  /// 「downloads」目录），再拼一层 `downloads` 会出现 `...\downloads\downloads`；
+  /// 而且下载包（资源包 1 GB+、更新 zip）本来就属于安装目录，放在一起
+  /// 用户能找到。安装目录不可写时（Program Files 未提权、只读介质）必须
+  /// 退回资源根，否则下载和更新都会失败。
+  Directory _downloadsDirectory(Directory root) {
+    final fallback = Directory(p.join(root.path, 'downloads'));
+    final desktop = _platformName == 'windows' ||
+        _platformName == 'macos' ||
+        _platformName == 'linux';
+    if (!desktop) return fallback;
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent;
+      final candidate = Directory(p.join(exeDir.path, 'downloads'));
+      candidate.createSync(recursive: true);
+      // 真正写一次才算数：Program Files 下 create 可能成功但写入被拒。
+      final probe = File(p.join(candidate.path, '.gl-write-test'));
+      probe.writeAsStringSync('x', flush: true);
+      probe.deleteSync();
+      return candidate;
+    } catch (_) {
+      return fallback;
+    }
   }
 
   Future<void> _createPaths(AppPaths paths) async {

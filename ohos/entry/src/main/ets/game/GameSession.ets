@@ -12,6 +12,7 @@ export interface GameSessionPayload {
   watermarkEnabled: boolean;
   autoCollectSunEnabled: boolean;
   detailedAudioDiagnosticsEnabled?: boolean;
+  localSaveGuardRequired?: boolean;
   renderScale?: number | null;
   screenFit?: string;
   touchDiagnosticsEnabled?: boolean;
@@ -20,6 +21,16 @@ export interface GameSessionPayload {
   allowedRemoteHosts: string[];
   gpNextRoot: string;
   exportTemporaryRoot: string;
+}
+
+/**
+ * 本机存档版本保护不可用。required 时缺失/空白/读取失败必须失败关闭，
+ * 由 GamePage 的统一初始化失败路径写退出结果并回到启动器。
+ */
+export class LocalSaveGuardUnusableError extends Error {
+  constructor(reason: string) {
+    super(`本机存档版本保护不可用（${reason}），已阻止启动`);
+  }
 }
 
 export class GameSession {
@@ -34,6 +45,12 @@ export class GameSession {
   readonly watermarkEnabled: boolean;
   readonly autoCollectSunEnabled: boolean;
   readonly detailedAudioDiagnosticsEnabled: boolean;
+  /**
+   * 本次启动是否必须成功加载本机存档版本保护脚本。有游戏版本时 Dart 会写入
+   * `__local_save_guard.js`，此时缺失/空白/读取失败必须阻止启动；旧 session
+   * JSON 没有该字段，默认 false（向后兼容旧启动器）。
+   */
+  readonly localSaveGuardRequired: boolean;
   readonly renderScale: number | null;
   /** balanced (16:10–17:9), showAll (17:9) or stretch: how the game viewport fits the screen. */
   readonly screenFit: string;
@@ -67,6 +84,7 @@ export class GameSession {
     this.watermarkEnabled = value.watermarkEnabled;
     this.autoCollectSunEnabled = value.autoCollectSunEnabled;
     this.detailedAudioDiagnosticsEnabled = value.detailedAudioDiagnosticsEnabled === true;
+    this.localSaveGuardRequired = value.localSaveGuardRequired === true;
     this.renderScale = value.renderScale ?? null;
     if (this.renderScale !== null && !(this.renderScale > 0)) {
       throw new Error('Invalid render scale');

@@ -130,9 +130,12 @@ print('OK', len(rs), '条回执字段完整')
   sec "Windows 构建脚本编码"
   # PowerShell 5.1 读无 BOM 的中文注释会按 ANSI 解码，直接语法报错；
   # 这几个坑只在 Windows 构建机上暴露，所以把编码固化成仓库侧断言。
-  local ps1="$ROOT/tools/build-windows.ps1"
-  if [ -f "$ps1" ]; then
-    local enc
+  # 覆盖 tools/ 下所有 .ps1：新增的实机测试/冒烟脚本同样会被 PowerShell 5.1 读取。
+  local ps1 found=0 name enc
+  for ps1 in "$ROOT"/tools/*.ps1; do
+    [ -f "$ps1" ] || continue
+    found=1
+    name=$(basename "$ps1")
     enc=$(python3 - "$ps1" <<'PY'
 import sys
 d = open(sys.argv[1], 'rb').read()
@@ -143,12 +146,11 @@ print(('bom-ok' if bom else 'bom-missing') + ' crlf=' + str(crlf) + ' lf_only=' 
 PY
 )
     case "$enc" in
-      bom-ok*'lf_only=0') ok "build-windows.ps1 为 UTF-8 BOM + CRLF（$enc）";;
-      *) bad "build-windows.ps1 编码不合格（$enc），Windows 构建会报语法错误";;
+      bom-ok*'lf_only=0') ok "$name 为 UTF-8 BOM + CRLF（$enc）";;
+      *) bad "$name 编码不合格（$enc），Windows 上会报语法错误/中文乱码";;
     esac
-  else
-    warn "未找到 tools/build-windows.ps1，跳过"
-  fi
+  done
+  [ "$found" = 1 ] || warn "tools/ 下没有 .ps1，跳过"
 
   sec "短提示词长度"
   local lines; lines=$(grep -cve '^$' "$H/prompts/01-start.md" 2>/dev/null || echo 99)

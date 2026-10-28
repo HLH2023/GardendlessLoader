@@ -34,17 +34,36 @@ class ShortcutService {
   void Function(LauncherShortcut shortcut)? onShortcut;
 
   /// The shortcut that started the launcher, if any; it is reported once.
-  Future<LauncherShortcut?> take() async =>
-      LauncherShortcut.fromName(await _channel.invokeMethod<String>('take'));
+  ///
+  /// 桌面端没有 shortcuts 原生通道；以前这里会抛 MissingPluginException，
+  /// 而调用点正好在初始化末尾，直接把启动判成失败（2026-10-27 Windows 实测）。
+  Future<LauncherShortcut?> take() async {
+    if (_isDesktop) return null;
+    try {
+      return LauncherShortcut.fromName(
+        await _channel.invokeMethod<String>('take'),
+      );
+    } on MissingPluginException {
+      return null;
+    }
+  }
 
   /// Titles the shortcuts in the launcher language. HarmonyOS has no dynamic
   /// shortcuts for apps; its shortcuts_config.json follows the system
   /// language instead.
   Future<void> publish(AppStrings strings) async {
-    if (Platform.operatingSystem == 'ohos') return;
-    await _channel.invokeMethod<void>('setItems', <String, String>{
-      LauncherShortcut.startGame.name: strings.startGame,
-      LauncherShortcut.importResources.name: strings.importResources,
-    });
+    if (_isDesktop || Platform.operatingSystem == 'ohos') return;
+    try {
+      await _channel.invokeMethod<void>('setItems', <String, String>{
+        LauncherShortcut.startGame.name: strings.startGame,
+        LauncherShortcut.importResources.name: strings.importResources,
+      });
+    } on MissingPluginException {
+      // 桌面端/未实现平台：没有桌面快捷方式可写，不影响启动。
+    }
   }
+
+  /// 桌面端（Windows/Linux/macOS）没有快捷方式原生实现。
+  bool get _isDesktop =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 }

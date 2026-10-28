@@ -11,8 +11,8 @@ enum GameExitReason {
   launchFailed,
   systemTerminated,
 
-  /// 在线形态下设备令牌被服务端拒绝（401/403）。原生宿主据此退出并
-  /// 写回退出原因，启动器在下次启动时清登录态。
+  /// 旧版在线宿主在设备令牌被服务端拒绝（401/403）时写回的原因。在线
+  /// 游玩已删除，但升级前留下的退出结果仍靠它清理登录态。
   tokenRejected;
 
   static GameExitReason fromWireName(Object? value) {
@@ -69,6 +69,7 @@ class GameExitResult {
 ///
 /// 只有原生在线宿主发现令牌被拒（401/403）才写 `tokenRejected`；没有令牌
 /// 时不用重复清（幂等），其他退出原因一律不动登录态。
-bool exitResultRequiresSignOut(GameExitResult? result, {required bool hasToken}) {
+bool exitResultRequiresSignOut(GameExitResult? result,
+    {required bool hasToken}) {
   return hasToken && result?.reason == GameExitReason.tokenRejected;
 }

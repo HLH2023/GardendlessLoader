@@ -5,7 +5,7 @@ import { util } from '@kit.ArkTS';
 import { webview } from '@kit.ArkWeb';
 import { GameBridge } from '../game/GameBridge';
 import { NativeGameResourceHandler } from '../game/NativeGameResourceHandler';
-import { GameSession } from '../game/GameSession';
+import { GameSession, LocalSaveGuardUnusableError } from '../game/GameSession';
 import { appLogStore, AppLogContext, AppLogEvent } from '../logging/AppLogStore';
 import { withDocumentPickerOrientation } from '../picker/DocumentPickerOrientation';
 
@@ -22,6 +22,9 @@ struct GamePage {
   private bridge: GameBridge | null = null;
   private documentStartScripts: Array<ScriptItem> = [];
   private exiting: boolean = false;
+  // 初始化失败后 build() 仍会创建 Web 组件；必须拦住 onControllerAttached，
+  // 否则 guard 校验失败后页面仍可能无保护地 loadUrl。
+  private launchFailed: boolean = false;
   // Foreground play time; shownAt is the clock while the page shows, else 0.
   private playedMs: number = 0;
   private shownAt: number = 0;
@@ -48,15 +51,22 @@ struct GamePage {
         scriptRules: [GameSession.ORIGIN],
       }];
     } catch (error) {
+      this.launchFailed = true;
       const launchError = error as Error;
+      const guardUnusable = error instanceof LocalSaveGuardUnusableError;
       const failureContext: AppLogContext = { stage: 'game_page_about_to_appear' };
+      if (guardUnusable) {
+        failureContext.reason = 'local_save_guard_unusable';
+      }
       const failureEvent: AppLogEvent = {
         source: 'ohos',
         level: 'ERROR',
         category: 'game.host',
         event: 'game_page_initialization_failed',
         outcome: 'failed',
-        code: 'game_page_initialization_failed',
+        code: guardUnusable
+          ? 'local_save_guard_unusable'
+          : 'game_page_initialization_failed',
         message: launchError.message,
         context: failureContext,
       };
@@ -86,6 +96,10 @@ struct GamePage {
         .fileAccess(false)
         .runJavaScriptOnDocumentStart(this.documentStartScripts)
         .onControllerAttached((): void => {
+          if (this.launchFailed) {
+            // aboutToAppear 已记录失败并写退出结果；这里绝不能再加载游戏。
+            return;
+          }
           const session = this.session;
           const bridge = this.bridge;
           const resourceHandler = this.resourceHandler;
@@ -230,6 +244,41 @@ struct GamePage {
     }
   }
 
+  /**
+   * 本机存档版本保护：Dart 的 `_prepareSaveBridge()` 把脚本写到 appRoot，
+   * 原生只负责在游戏脚本之后注入，不再维护第二份实现。
+   *
+   * required 时缺失/空白/读取失败必须抛错阻止启动：静默跳过会让旧游戏在
+   * 没有版本保护的情况下读取高版本 localStorage，降级时把存档改写坏。
+   */
+  private loadLocalSaveGuard(session: GameSession): string {
+    const guardPath = `${session.appRoot}/__local_save_guard.js`;
+    let raw = '';
+    let readFailed = false;
+    try {
+      raw = fs.readTextSync(guardPath);
+    } catch (_error) {
+      readFailed = true;
+    }
+    const script = readFailed ? '' : raw.trim();
+    if (script.length > 0) {
+      return `\n${script}`;
+    }
+    if (!session.localSaveGuardRequired) {
+      return '';
+    }
+    const reason = readFailed ? 'missing_or_unreadable' : 'empty';
+    const guardEvent: AppLogEvent = {
+      source: 'ohos', level: 'ERROR', category: 'game.host',
+      event: 'local_save_guard_unusable', outcome: 'failed',
+      code: 'local_save_guard_unusable',
+      gameSessionId: session.sessionId,
+      context: { reason: reason, path: guardPath },
+    };
+    appLogStore.emit(guardEvent);
+    throw new LocalSaveGuardUnusableError(reason);
+  }
+
   private buildDocumentStartScript(session: GameSession): string {
     const config = JSON.stringify({
       hostAbi: 1,
@@ -267,6 +316,7 @@ struct GamePage {
       );
       source += `\n${util.TextDecoder.create('utf-8').decodeToString(bytes)}`;
     }
+    source += this.loadLocalSaveGuard(session);
     return source;
   }
 

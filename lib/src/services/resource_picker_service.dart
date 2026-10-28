@@ -36,11 +36,29 @@ class ResourcePickerService {
 
   /// File name of a ZIP another app handed to the loader and that is still
   /// waiting for the user's decision.
-  Future<String?> incomingZipName() =>
-      _mobileZipImporterChannel.invokeMethod<String>('incomingZip');
+  ///
+  /// 桌面端没有这个原生通道（Windows/Linux/macOS），直接调用会抛
+  /// `MissingPluginException`；它以前在初始化末尾被直接 await，于是整个
+  /// 启动流程失败（2026-10-27 Windows 实测：应用初始化失败）。
+  /// 通道缺失等价于「没有待处理的 ZIP」，返回 null 就好。
+  Future<String?> incomingZipName() async {
+    if (!_isSupportedPlatform) return null;
+    try {
+      return await _mobileZipImporterChannel
+          .invokeMethod<String>('incomingZip');
+    } on MissingPluginException {
+      return null;
+    }
+  }
 
-  Future<void> discardIncomingZip() =>
-      _mobileZipImporterChannel.invokeMethod<void>('discardIncomingZip');
+  Future<void> discardIncomingZip() async {
+    if (!_isSupportedPlatform) return;
+    try {
+      await _mobileZipImporterChannel.invokeMethod<void>('discardIncomingZip');
+    } on MissingPluginException {
+      // 没有原生实现 = 没有待处理的 ZIP，无需丢弃。
+    }
+  }
 
   /// Extracts from the system picker when [incoming] is false, otherwise
   /// from the ZIP another app handed to the loader.

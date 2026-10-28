@@ -2,18 +2,17 @@ import 'package:flutter/material.dart';
 
 import '../../app_controller.dart';
 import '../../l10n/app_strings.dart';
-import '../../services/app_settings_store.dart';
 import '../launcher_actions.dart';
 import '../theme/garden_theme.dart';
 import '../widgets/token_login_dialog.dart';
 import '../widgets/garden_widgets.dart';
 
-/// 游玩形态 + 全局登录卡片。
+/// 全局登录卡片。
 ///
-/// 两种形态共用同一个本地服务器与同一份存档桥，所以这里只切换「资源从哪来」；
-/// 登录态是启动器级别的（云存档 / 资源下载 / 在线游玩 / 存档管理共用一份令牌）。
-class PlayModeCard extends StatelessWidget {
-  const PlayModeCard({
+/// 游玩形态固定为本地资源包，所以这张卡只负责启动器级别的账号：
+/// 云存档 / 资源下载 / 存档管理共用一份令牌。
+class AccountCard extends StatelessWidget {
+  const AccountCard({
     super.key,
     required this.controller,
     required this.actions,
@@ -26,85 +25,15 @@ class PlayModeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final palette = context.garden;
-    final strings = context.strings;
-    final mode = controller.playMode;
-    final busy = controller.busy ||
-        controller.storageBusy ||
-        controller.desktopGameActive ||
-        controller.gameLaunchInFlight;
-
     return SurfaceCard(
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 16 : 20,
         vertical: compact ? 12 : 20,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            strings.playModeTitle,
-            style: TextStyle(
-              color: palette.ink,
-              fontSize: compact ? 14 : 15,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          SizedBox(height: compact ? 8 : 12),
-          SegmentedButton<PlayMode>(
-            segments: [
-              ButtonSegment(
-                value: PlayMode.local,
-                label: Text(strings.playModeLocal),
-              ),
-              ButtonSegment(
-                value: PlayMode.online,
-                label: Text(strings.playModeOnline),
-              ),
-            ],
-            selected: {mode},
-            onSelectionChanged: busy
-                ? null
-                : (selection) => controller.setPlayMode(selection.first),
-          ),
-          SizedBox(height: compact ? 6 : 10),
-          Text(
-            mode == PlayMode.local
-                ? strings.playModeLocalHint
-                : strings.playModeOnlineHint,
-            style: TextStyle(
-              color: palette.inkMuted,
-              fontSize: compact ? 12 : 12.5,
-              height: 1.45,
-            ),
-          ),
-          if (mode == PlayMode.local && !controller.hasCurrentResource)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                strings.playModeLocalNeedsResource,
-                style: TextStyle(color: palette.danger, fontSize: 12.5),
-              ),
-            ),
-          if (mode == PlayMode.online && !controller.onlinePlaySupported)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                controller.isDesktopPlatform
-                    ? strings.playModeOnlineNeedsServer
-                    : strings.playModeDesktopOnly,
-                style: TextStyle(color: palette.danger, fontSize: 12.5),
-              ),
-            ),
-          SizedBox(height: compact ? 12 : 18),
-          Divider(color: palette.border, height: 1),
-          SizedBox(height: compact ? 10 : 14),
-          _AccountRow(
-            controller: controller,
-            actions: actions,
-            compact: compact,
-          ),
-        ],
+      child: _AccountRow(
+        controller: controller,
+        actions: actions,
+        compact: compact,
       ),
     );
   }

@@ -3,15 +3,9 @@ import 'package:flutter/services.dart';
 export 'game_host_platform.dart';
 import 'game_host_platform.dart';
 
-/// 游戏会话形态：本地资源包 / 在线（安卓端从服务器拉游戏页）。
-enum GameSessionMode {
-  local,
-  online;
-
-  static GameSessionMode fromName(Object? value) =>
-      value == 'online' ? GameSessionMode.online : GameSessionMode.local;
-}
-
+/// 游戏会话：本地资源包。
+///
+/// 在线游玩形态已删除；会话只描述一个本地资源槽、入口与宿主参数。
 class GameSession {
   const GameSession({
     required this.sessionId,
@@ -19,11 +13,7 @@ class GameSession {
     required this.resourceRoot,
     required this.platform,
     required this.entryPath,
-    this.mode = GameSessionMode.local,
-    this.originOverride,
     this.appRoot,
-    this.gameVersion = '',
-    this.deviceId = '',
     required this.activationGeneration,
     required this.hasGpNext,
     required this.gpNextCompatible,
@@ -31,6 +21,7 @@ class GameSession {
     required this.watermarkEnabled,
     this.autoCollectSunEnabled = false,
     this.detailedAudioDiagnosticsEnabled = false,
+    this.localSaveGuardRequired = false,
     this.renderScale,
     this.screenFit = ScreenFit.balanced,
     this.touchDiagnosticsEnabled = false,
@@ -68,11 +59,6 @@ class GameSession {
     return GameSession(
       sessionId: _requiredString(json, 'sessionId'),
       packageId: json['packageId'] as String?,
-      mode: GameSessionMode.fromName(json['mode']),
-      // 本地形态的 origin 由平台内置给出，不能把 JSON 里的值当覆盖
-      originOverride: GameSessionMode.fromName(json['mode']) == GameSessionMode.online
-          ? json['origin'] as String?
-          : null,
       appRoot: json['appRoot'] as String?,
       resourceRoot: _requiredString(json, 'resourceRoot'),
       platform: GameHostPlatform.fromWireName(json['platform']),
@@ -85,6 +71,8 @@ class GameSession {
       autoCollectSunEnabled: json['autoCollectSunEnabled'] as bool? ?? false,
       detailedAudioDiagnosticsEnabled:
           json['detailedAudioDiagnosticsEnabled'] as bool? ?? false,
+      // 旧 session JSON 没有该字段：默认 false，原生宿主保持原行为。
+      localSaveGuardRequired: json['localSaveGuardRequired'] as bool? ?? false,
       renderScale: (renderScale as num?)?.toDouble(),
       screenFit: ScreenFit.fromName(json['screenFit']),
       touchDiagnosticsEnabled:
@@ -111,6 +99,13 @@ class GameSession {
   final bool autoCollectSunEnabled;
   final bool detailedAudioDiagnosticsEnabled;
 
+  /// 本次启动是否必须成功加载本机存档版本保护脚本。
+  ///
+  /// 有游戏版本时 Dart 会生成并原子写入 guard，原生宿主必须把「文件缺失/
+  /// 空白/读取失败」当成启动失败；无版本（旧式未索引资源包）为 false，
+  /// 允许没有 guard 启动，保持旧包可用。
+  final bool localSaveGuardRequired;
+
   /// Share of the device pixel ratio the game canvas renders at; null renders
   /// at the device's own ratio.
   final double? renderScale;
@@ -125,22 +120,10 @@ class GameSession {
   final String gpNextRoot;
   final String exportTemporaryRoot;
 
-  /// 会话形态。在线形态下 [originOverride] 指向服务器，`resourceRoot` 不参与取资源。
-  final GameSessionMode mode;
-
-  /// 在线形态的 origin（服务器地址）；本地形态为空，用平台内置 origin。
-  final String? originOverride;
-
   /// 启动器数据目录（存档桥文件所在的目录）。为空时由原生按资源槽的父目录推导。
   final String? appRoot;
 
-  /// 本次游玩的游戏版本（存档分区、在线会话心跳都要）。
-  final String gameVersion;
-
-  /// 在线会话心跳的设备标识（原生侧 enter/leave 要配对）。
-  final String deviceId;
-
-  String get origin => originOverride ?? platform.origin;
+  String get origin => platform.origin;
 
   Uri get entryUri {
     final base = Uri.parse('$origin/$entryPath');
@@ -159,10 +142,7 @@ class GameSession {
       'state': 'prepared',
       'resourceRoot': resourceRoot,
       'platform': platform.wireName,
-      'mode': mode.name,
       if (appRoot != null) 'appRoot': appRoot,
-      if (gameVersion.isNotEmpty) 'gameVersion': gameVersion,
-      if (deviceId.isNotEmpty) 'deviceId': deviceId,
       'origin': origin,
       'entryPath': entryPath,
       'entryUrl': entryUri.toString(),
@@ -173,6 +153,7 @@ class GameSession {
       'watermarkEnabled': watermarkEnabled,
       'autoCollectSunEnabled': autoCollectSunEnabled,
       'detailedAudioDiagnosticsEnabled': detailedAudioDiagnosticsEnabled,
+      'localSaveGuardRequired': localSaveGuardRequired,
       'renderScale': renderScale,
       'screenFit': screenFit.name,
       'touchDiagnosticsEnabled': touchDiagnosticsEnabled,

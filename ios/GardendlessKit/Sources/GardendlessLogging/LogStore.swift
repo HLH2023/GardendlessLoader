@@ -265,6 +265,7 @@ public final class LogStore {
       try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize
     } ?? 0
     if handle == nil || size + nextBytes > segmentBytes {
+      let rotating = handle != nil
       try? handle?.close()
       let file = logsDirectory.appendingPathComponent(
         "app-\(appSessionId)-\(String(format: "%03d", segment)).jsonl"
@@ -275,6 +276,8 @@ public final class LogStore {
       }
       currentFile = file
       handle = try FileHandle(forWritingTo: file)
+      // 换段时按总量清理：只在启动时清一次的话，长时间运行会无限增长。
+      if rotating { cleanup() }
     }
   }
 
@@ -317,9 +320,11 @@ public final class LogStore {
         < modificationDate($1, fallback: .distantPast) }
     var total = remaining.reduce(0) { $0 + fileSize($1) }
     while total > 10 * 1024 * 1024, let file = remaining.first {
+      remaining.removeFirst()
+      // 换段后会立刻清理一次，绝不能把正在写的这一份删掉。
+      if file == currentFile { continue }
       total -= fileSize(file)
       try? manager.removeItem(at: file)
-      remaining.removeFirst()
     }
   }
 

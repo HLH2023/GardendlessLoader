@@ -311,6 +311,9 @@ object AppLogStore {
             segment += 1
             currentFile = target
             writer = BufferedWriter(OutputStreamWriter(FileOutputStream(target, true), StandardCharsets.UTF_8))
+            // 只在换段时按总量清理。以前只在上次进程启动时清一次，长时间运行
+            // （界面异常反复报错）会把 10 MB 配额写成几百 GB。
+            cleanupLocked()
         }
     }
 
@@ -327,8 +330,11 @@ object AppLogStore {
         groups.drop(completedSessionLimit).forEach { entry -> entry.value.forEach { it.delete() } }
         var remaining = logsDirectory.listFiles()?.filter { it.name.endsWith(".jsonl") }?.sortedBy { it.lastModified() } ?: emptyList()
         var total = remaining.sumOf { it.length() }
+        val beingWritten = currentFile?.name
         for (file in remaining) {
             if (total <= totalSizeBytes) break
+            // 换段后会立刻清理一次，绝不能把正在写的这一份删掉。
+            if (file.name == beingWritten) continue
             total -= file.length()
             file.delete()
         }

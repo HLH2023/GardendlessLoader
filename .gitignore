@@ -96,3 +96,6 @@ yarn-error.log*
 # Local release artifacts
 # 产物只用于 Hermes 建 Release，不进版本库（*.apk/*.zip 已在上面忽略）
 dist/
+
+# Playwright MCP console logs (local browser automation only)
+/.playwright-mcp/

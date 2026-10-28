@@ -100,6 +100,8 @@ final class GameHostController: UIViewController,
   private var pendingGpNextImportId: String?
   private var pendingGpNextSelection: (id: String, directory: Bool)?
   private var exiting = false
+  /// loadView 因 guard 不可用而提前退出；此时 webView 从未创建。
+  private var launchFailed = false
   private var cleanedUp = false
   private var sceneActivityObservers: [NSObjectProtocol] = []
   private var playedTime: TimeInterval = 0
@@ -169,9 +171,27 @@ final class GameHostController: UIViewController,
     )
     let contentController = WKUserContentController()
     contentController.add(networkRuleList)
+    let documentStartScript: String
+    do {
+      documentStartScript = try buildDocumentStartScript()
+    } catch {
+      // guard 不可用时不能创建 WebView：先立一个占位视图，再走与
+      // navigationDidFail 相同的启动失败收尾，保证不会无保护地加载游戏。
+      // 收尾必须延后到本轮 runloop 之后：此时 AppDelegate 正在设置
+      // rootViewController，同步调用 onExit 会被外层赋值覆盖掉。
+      launchFailed = true
+      let placeholder = UIView()
+      placeholder.backgroundColor = .black
+      view = placeholder
+      let message = error.localizedDescription
+      DispatchQueue.main.async { [weak self] in
+        self?.exit(reason: "launchFailed", message: message)
+      }
+      return
+    }
     contentController.addUserScript(
       WKUserScript(
-        source: buildDocumentStartScript(),
+        source: documentStartScript,
         injectionTime: .atDocumentStart,
         forMainFrameOnly: true
       )
@@ -216,6 +236,8 @@ final class GameHostController: UIViewController,
 
   override func viewDidLoad() {
     super.viewDidLoad()
+    // guard 校验失败时 WebView 尚未创建，绝不能在这里访问它。
+    guard !launchFailed else { return }
     logStore.emit([
       "source": "ios",
       "level": "INFO",
@@ -730,14 +752,17 @@ final class GameHostController: UIViewController,
     fileTasks.destroy()
     sceneActivityObservers.forEach(NotificationCenter.default.removeObserver)
     sceneActivityObservers = []
-    webView.configuration.userContentController.removeScriptMessageHandler(
-      forName: ScriptMessageBridge.name,
-      contentWorld: .page
-    )
-    scriptBridge.destroy()
-    webView.stopLoading()
-    webView.navigationDelegate = nil
-    webView.removeFromSuperview()
+    // guard 校验失败时 WebView 还没创建，收尾必须容忍 nil。
+    if webView != nil {
+      webView.configuration.userContentController.removeScriptMessageHandler(
+        forName: ScriptMessageBridge.name,
+        contentWorld: .page
+      )
+      webView.stopLoading()
+      webView.navigationDelegate = nil
+      webView.removeFromSuperview()
+    }
+    scriptBridge?.destroy()
   }
 
   private func writeExitResult(reason: String, message: String?) {
@@ -761,7 +786,49 @@ final class GameHostController: UIViewController,
     }
   }
 
-  private func buildDocumentStartScript() -> String {
+  /// 本机存档版本保护：Dart 的 `_prepareSaveBridge()` 把脚本写到 appRoot，
+  /// 原生只负责在游戏脚本之后内联，不再维护第二份实现。
+  ///
+  /// required 时缺失/空白/读取失败必须抛错阻止启动：只 `if let` 跳过会让旧
+  /// 游戏在没有版本保护的情况下读取高版本 localStorage，降级时把存档改写坏。
+  private func loadLocalSaveGuard() throws -> String {
+    let guardURL = session.appRoot.appendingPathComponent("__local_save_guard.js")
+    let raw = try? String(contentsOf: guardURL, encoding: .utf8)
+    let script = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !script.isEmpty {
+      return sanitizeInlineScript(script)
+    }
+    guard session.localSaveGuardRequired else { return "" }
+    let reason = raw == nil ? "missing_or_unreadable" : "empty"
+    logStore.emit([
+      "source": "ios",
+      "level": "ERROR",
+      "category": "game.host",
+      "event": "local_save_guard_unusable",
+      "outcome": "failed",
+      "code": "local_save_guard_unusable",
+      "gameSessionId": session.sessionId,
+      "context": ["reason": reason, "path": guardURL.path],
+    ])
+    throw GameError.failed(
+      .invalidSession,
+      "本机存档版本保护不可用（\(reason)），已阻止启动"
+    )
+  }
+
+  /// guard 由 Dart 生成，理论上不含 `</script`/`<!--`；这里做与 Android 一致的
+  /// 轻量转义，避免脚本内容改变 document-start 注入的语义。
+  private func sanitizeInlineScript(_ script: String) -> String {
+    return script
+      .replacingOccurrences(
+        of: "</script",
+        with: "<\\/script",
+        options: .caseInsensitive
+      )
+      .replacingOccurrences(of: "<!--", with: "<\\!--")
+  }
+
+  private func buildDocumentStartScript() throws -> String {
     let config: [String: Any] = [
       "hostAbi": 1,
       "packageId": session.packageId ?? NSNull(),
@@ -804,6 +871,10 @@ final class GameHostController: UIViewController,
         preconditionFailure("Missing shared game bridge asset: \(name)")
       }
       source += "\n" + script
+    }
+    let guardScript = try loadLocalSaveGuard()
+    if !guardScript.isEmpty {
+      source += "\n" + guardScript
     }
     return source
   }

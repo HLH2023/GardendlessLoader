@@ -493,6 +493,40 @@ const userErrorCatalog = <String, UserLogError>{
     ),
     recoverable: true,
   ),
+  // 下面三条是 Windows 更新重启后读回执时才用的：更新发生在应用退出之后，
+  // 结果只能等下次启动提示，因此提示里必须给出「接下来怎么做」。
+  'windows_update_rolled_back': UserLogError(
+    category: 'app.update',
+    level: LogLevel.warn,
+    title: LocalizedText('更新已回滚', 'Update rolled back'),
+    action: LocalizedText(
+      '重新下载更新再试；若仍失败，请从「设置 → 打开下载目录」手动解压更新包。',
+      'Download the update again; if it still fails, extract the package '
+          'manually from Settings → Open download folder.',
+    ),
+    recoverable: true,
+  ),
+  'windows_update_failed_after_restart': UserLogError(
+    category: 'app.update',
+    level: LogLevel.error,
+    title: LocalizedText('更新未完成', 'Update did not finish'),
+    action: LocalizedText(
+      '安装目录可能不完整：请重新下载更新并覆盖，或手动解压更新包；详情在「日志」页。',
+      'The install folder may be incomplete: download and apply the update '
+          'again, or extract the package manually. Details are on the Logs page.',
+    ),
+    recoverable: true,
+  ),
+  'windows_update_interrupted': UserLogError(
+    category: 'app.update',
+    level: LogLevel.warn,
+    title: LocalizedText('更新被中断', 'Update interrupted'),
+    action: LocalizedText(
+      '重新点「退出并自动更新」；杀毒软件拦截 PowerShell 时请放行后再试。',
+      'Run "Quit and update" again; if antivirus blocks PowerShell, allow it first.',
+    ),
+    recoverable: true,
+  ),
   'flutter_framework_error': UserLogError(
     category: 'app.lifecycle',
     level: LogLevel.error,

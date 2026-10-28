@@ -2,7 +2,7 @@
 
 > 这份清单是给**你（用户）在真机上照着点**的。每一步写了「点哪里 / 看什么 / 失败抓什么」。
 > 上游的手工清单在 `docs/acceptance-checklist.md`（不要改）；这份只覆盖个人构建线新增的能力：
-> 本地资源导入、在线形态心跳、令牌失效、存储位置迁移。
+> 本地资源导入、本地游玩、令牌失效、存储位置迁移。在线游玩已于 2026-10-26 删除。
 >
 > 出问题不用描述得很专业：把该步骤的日志复制出来即可，日志里有事件名和状态码，能直接定位代码。
 
@@ -11,7 +11,7 @@
 | 项 | 要求 | 怎么确认 |
 |---|---|---|
 | 安装包 | `0.9.0-hlh.17`（versionCode 90017），v1+v2+v3 三签 | 设置页底部版本号；安装时国产 ROM 不报「未签名」 |
-| 服务器地址 | 构建时已注入（`--dart-define=PVZGE_SERVER`） | 「在线」形态可选，不是灰的 |
+| 服务器地址 | 构建时已注入（`--dart-define=PVZGE_SERVER`） | 登录/云存档可连通；在线游玩已删除 |
 | 账号 | 已登录（设置页显示账号） | 云端存档页能列出存档 |
 | 资源包 | 本地形态已导入并通过校验 | 「资源」页显示槽位、文件数、大小 |
 
@@ -32,32 +32,31 @@
 |---|---|---|---|
 | 1.1 | 资源 → **选择 ZIP 导入**，选一个官方资源包 | 进度条走完；提示「导入成功」；当前资源显示新版本与文件数 | `resource.import` 下 `resource_import_finished` 的 `code` |
 | 1.2 | 立刻再点一次导入 | 按钮应禁用/提示忙，不会并发解压 | 出现两个 `resource_import_started` 且 `operationId` 不同 → 门禁漏了 |
-| 1.3 | 返回首页 → 选「本地」→ **开始游戏** | 游戏正常进入，主菜单可见 | `game.host / game_host_created`；`game.host / game_host_launch_finished` 的 `outcome` |
+| 1.3 | 返回首页 → **开始游戏** | 游戏从本地资源包正常进入，主菜单可见 | `game.host / game_host_created`；`game.host / game_host_launch_finished` 的 `outcome` |
 | 1.4 | 玩 1 分钟 → 按返回退出 | 回到启动器；游戏时长+1 分钟（首页统计） | `game_exit_result.json` 的 `reason=userReturned`，`playedMs>0` |
 | 1.5 | 再启动一次 | 不重复解压、秒进游戏 | 出现 `resource_import_started` → 资源被误判失效 |
 
 **令牌边界（hlh.18 起）**：游戏页里只有 3 小时有效的「存档会话令牌」
-（`__sync_app.js`），设备令牌不在页面 JS 里；原生心跳/在线代理另读 0600 的
-`__sync_native_token`。会话令牌只能读写存档、不能签发/吊销令牌，过期即失效。
-即便如此，**仍不要导入来路不明的第三方资源包**：页面能拿到的会话令牌在有效期内
-可以读写你本人的存档。
+（`__sync_app.js`），设备令牌不在页面 JS 里。会话令牌只能读写存档、不能签发/
+吊销令牌，过期即失效。在线游玩删除后原生代理/心跳不再存在，旧的
+`__sync_native_token` 明文文件会在启动/登出时清理。即便如此，**仍不要导入
+来路不明的第三方资源包**：页面能拿到的会话令牌在有效期内可以读写你本人的存档。
 
-## 2. 在线形态：心跳、401、切后台（P0，最重要）
+## 2. 本地游玩：首屏、切后台、退出（P0）
 
-在线形态的关键不是「画面能出来」，而是**服务端要认为你在玩**——资源包重打包靠这个信号让路。
-心跳在原生侧（`OnlineSessionHeartbeat.kt`），60 s 一次，Flutter 引擎销毁后仍活着。
+在线游玩删除后，启动器只有本地资源包形态；判断标准是**本地资源包能稳定启动、
+切后台不白屏、退出能回到启动器且不丢进度**。
 
 | # | 操作 | 预期 | 失败时看 |
 |---|---|---|---|
-| 2.1 | 首页选「在线」→ **开始游戏** | 游戏页从服务器加载，能进主菜单 | `game.host / game_host_created`；`game.webview / webview_page_load_finished` |
-| 2.2 | 进游戏后**停留 5 分钟**，不要退出 | 日志里每 ~60 s 一条 `game.heartbeat / heartbeat_sent`，`statusCode=200`，`context.phase=enter` | `heartbeat_failed` 的 `code`：`heartbeat_http_401` → 令牌被吊销；`heartbeat_network_error` → 网络/域名 |
-| 2.3 | 让 Hermes 查服务端 | `online/status` 的 `active > 0`，且能看到你的 `gameVersion` | 日志有 200 但 active=0 → 服务端会话表/时区问题 |
-| 2.4 | 玩 5 分钟后**直接按返回**退出（不要杀进程） | 日志出现 `heartbeat_sent`（`phase=leave`）；120 s 内 `online/status` 归零 | 退出日志缺 leave → `onDestroy` 没走到，注意是否被系统杀进程 |
-| 2.5 | 切到后台（Home）等 30 s，再切回游戏 | 游戏画面还在；日志有 `game.lifecycle / game_activity_paused` 与 `_resumed`；回来后资源继续加载（不白屏） | 回来白屏 → 抓 `webview_page_load_finished` 与 `resource_request_failed` 的时间顺序 |
-| 2.6 | 在后台放 2 分钟再回来 | 心跳应继续（App 未被冻结时）；资源不重新下载 | 缺 `heartbeat_sent` → 被系统冻结，属已知边界，记录机型/系统版本 |
+| 2.1 | 首页点 **开始游戏** | 游戏页从本地资源加载，能进主菜单 | `game.host / game_host_created`；`game.webview / webview_page_load_finished` |
+| 2.2 | 切到后台（Home）等 30 s，再切回游戏 | 游戏画面还在；日志有 `game.lifecycle / game_activity_paused` 与 `_resumed`；回来后资源继续加载（不白屏） | 回来白屏 → 抓 `webview_page_load_finished` 与 `resource_request_failed` 的时间顺序 |
+| 2.3 | 在后台放 2 分钟再回来 | 游戏画面仍在；资源不重新下载 | 被系统冻结/杀进程 → 记录机型/系统版本（B-33） |
+| 2.4 | 玩 1 分钟 → 按返回退出 | 回到启动器；时长统计前进；下次启动秒进 | `game_exit_result.json` 的 `reason=userReturned`，`playedMs>0` |
+| 2.5 | 游戏内保存一次 → 退出 → 重进 | 进度还在（本地存档 + 云同步） | `game.sync` 下的上传/恢复事件；存档页能看到记录 |
 
-**判据（B-01）**：真机在线游玩 5 分钟后 `online/status` 的 `active > 0`；
-退出后 120 s 内归零。日志侧对应 `heartbeat_sent` + `phase=leave`。
+**判据（B-33）**：本地资源包首屏不崩、切后台回来不白屏、退出能落到
+`game_exit_result.json`；模拟器上的 crashpad/ANR 不能替代真机结论。
 
 ## 3. 令牌失效（401）必须真的退登（P0）
 
@@ -66,11 +65,9 @@
 | # | 操作 | 预期 | 失败时看 |
 |---|---|---|---|
 | 3.1 | 用另一台设备/管理页**吊销当前设备令牌** | — | — |
-| 3.2 | 在启动器点一次「刷新」云存档（或直接开始在线游戏） | 启动器侧：提示「登录状态已失效」，账号退出登录，令牌清空 | `cloud.auth / device_token_rejected`，`code=save_token_rejected` |
-| 3.3 | 在线游戏中令牌被吊销（另一台设备操作），等下一次资源请求或心跳 | 游戏自动退回启动器；下次打开启动器已退登并提示重新登录 | `game.heartbeat / online_token_rejected`；退出结果 `reason=tokenRejected`；启动器日志 `cloud.auth / device_token_rejected` 且 `context.source=native_online_host` |
-
-> 3.3 是原生侧的兜底：401 先出现在资源代理（首屏子资源），或最晚出现在下一次心跳。
-> 退登动作发生在**下一次启动启动器时**（Flutter 引擎在游戏期间已销毁），这是设计约束不是 bug。
+| 3.2 | 在启动器点一次「刷新」云存档 | 启动器侧：提示「登录状态已失效」，账号退出登录，令牌清空 | `cloud.auth / device_token_rejected`，`code=save_token_rejected` |
+> 在线游玩删除后，401 只会在启动器/云存档请求里出现；游戏内不再有原生资源代理
+> 或心跳兜底。令牌被吊销时，下一次云存档请求会退登并提示重新登录。
 
 ## 3.9 21:9 与存档面板（hlh.22/23）
 
@@ -88,7 +85,7 @@
       （内存里的进度尚未落盘，覆盖会丢）。
 - [ ] 以上面板按钮（下载/保留/关闭/重开）都能一次点中，不被原生触控层吞掉。
 - [ ] 面板 iframe 里能看到「当前身份 / 我的存档 / 存档列表 / 历史版本」，
-      **不是一整块空白深色**。本地资源包模式与在线模式各验一次。
+      **不是一整块空白深色**。只验本地资源包模式（在线游玩已删除）。
 - [ ] 面板里点「历史版本 / 下载 / 恢复此版」有响应；普通账号只能看到自己的存档。
 - [ ] 面板里没有独立「↑ 上传」按钮；上传由存档同步自动完成。
 - [ ] 启动器存档页从顶部滚到底部，最后一条提示完整可见、不被手势条遮挡。
@@ -107,6 +104,82 @@
       点「下载最新云端」得到 JSON，点「保留本机并上传」后云端变成当前进度。
 - [ ] App 内在存档面板点单条「下载」，文件能通过游戏页导出到系统导出目录
       （以前 Android WebView 没有 DownloadListener，点了没反应）。
+
+### 3.11 版本号来源与 legacy 继承（legacy 路径已 E2E 验证）
+
+Web 端与启动器不是同一套版本来源，验收时不要拿一边的值去推断另一边：
+
+- **Web 端**：`version-check.js` 从页面标题（`PvZ2 Gardendless Online | <版本>`）
+  解析当前版本，写入 `window.__pvzGameVersion`；`sync.js` 的 `gameVersion()` 优先
+  使用宿主注入的 `__PVZGE_APP__.gameVersion`，否则用它，随后 `/load`、`/save`
+  都带上这个版本号。
+- **启动器**：启动游戏时 `_playGameVersion()` 在**在线**形态使用远端资源清单的
+  `game.version`，其他形态使用已导入资源包 manifest 的 `gameVersion`。
+- **启动器存档页（B-19 已按新语义重做）**：页面默认跟随当前游玩形态，
+  但版本来源必须分开，且允许用户手动切换查看另一侧：
+  - 本地资源版本 → 已校验资源包的 `currentGameVersion`；没有本地资源时
+    显示「先导入资源」错误码 `local_resource_missing`，**不查 legacy**。
+  - 在线版本 → 服务器资源清单版本；取不到时显示
+    `online_version_unavailable`，**不借用本地版本**。
+  - 切换查看分区只改变本页读取的云端分区，不改变正在运行/下次启动的
+    游戏会话版本；游戏会话在启动时固定上下文。
+- **本机版本隔离**：换资源版本不会换 origin（Android 本地固定 appassets、
+  桌面端本地端口固定）。游戏脚本执行前会读 `__pvzSaveContext`，把四个游戏键
+  和同步状态（`__pvzPending`/`__pvzCloudProfiles` 等）按版本归档到
+  `__pvzBlocked_<版本>_<键>` / `__pvzState_<版本>_<键>`。
+  - 降级：先备份高版本内容，再清空活动键，然后恢复低版本自己的备份（没有就空档）。
+  - 升级：目标版本已有本地备份就恢复它，没有才继承当前内容。
+  - 每次切换后把上下文推进到当前版本，**连续启动同一版本不会重复清空/覆盖备份**。
+  验收：0.16.2 玩一会 → 换回 0.16.1 资源包 → 进游戏看不到 0.16.2 的进度，
+  localStorage 里有 `__pvzBlocked_0.16.2_*` 备份；在 0.16.1 玩一会再退出重进，
+  0.16.1 进度仍在且 0.16.2 备份没被覆盖；再换回 0.16.2 恢复 0.16.2 进度。
+- **写档信封**：客户端上传时 `gameVersion` 必须在请求体顶层，不能放进 `data`。
+  放进 `data` 会被服务端当成未知存档键跳过，整份存档落进 legacy；同步脚本的
+  `send()` 已按这个约定拆开信封与存档键（B-21 已修）。
+- **legacy 继承规则**（服务端 `pick_load_version()`）：
+  1. 请求版本有存档 → `exact`；
+  2. 请求版本没有 → 取比它旧的版本里最新的一份，legacy 永远排最旧，
+     所以**任意版本**都能继承 legacy（`load_kind=migrated`），
+     之后按新版本上传；
+  3. 只有比请求版本更新的存档 → 不回退，`load_kind=none` 且
+     `version_mismatch=true`，避免新存档被旧客户端降级使用。
+
+验收 legacy 时不要为了消掉 `migrated` 就把 legacy 目录改写成当前版本；
+旧客户端仍要靠它读取。正确做法是让新客户端继承后按当前版本另写一份。
+
+### 3.12 多玩家云端存档（服务端已实现，待部署 E2E）
+
+游戏把全部玩家放在 `PvZ2_PlayerProperties` 数组里；云端以
+`by-version/<gv>/profiles/<uuid>.json` + `profiles.json` 为权威，数组只是传输信封。
+`/load` 会按 manifest 顺序重建数组并给每个玩家注入 `__pvz_profile_id`；
+游戏正常读写、改名、换序会保留这个字段。验收：
+
+- [ ] 同一账号有两份玩家（如 nb/cool）：`/load` 返回两个不同
+      `__pvz_profile_id`，`profiles` 列表与之一一对应。
+- [ ] 设备 A 只改 nb、设备 B 只改 cool：两边保存都成功，云端两份 revision
+      各自推进，互不覆盖；后提交者不会把对方的玩家回退。
+- [ ] 设备 A 改 cool 时基准已过期：只有 cool 报 `profileConflicts`，
+      nb 在同一次请求里正常保存，云端 cool 保持设备 B 的内容。
+- [ ] 游戏内删除一个玩家并保存：云端该玩家进入 tombstone，`/load` 不再返回；
+      历史仍可按 profileId 查到，并可从历史恢复。
+- [ ] 不同账号可以有同名玩家（都叫 nb）：profileId 不同，存档互不影响。
+- [ ] 启动器 Saves 页：玩家卡片按 index 排序，显示名称/金币/宝石/最后写入/
+      短 revision；从旧版本继承时显示来源版本 badge；展开后只回滚这一份玩家。
+- [ ] 同名不同 authentik uid 访问同一 username 目录：必须 403，不能认领。
+- [ ] 旧客户端（只发整包 `baseVer`）仍然受整包乐观并发保护：12 个并发写
+      只有一个成功，其余 `stale_base`。
+- [ ] 新玩家第一次保存后，`/save` 响应带 `profiles[].id`；同一次会话继续改这份
+      玩家并保存，云端内容必须真的更新（不能只更新管理页摘要）。
+- [ ] 已删除的 profileId 被旧设备原样带回：`/save` 必须报该 id 的
+      `profileConflicts`，云端不复活、也不换新 id；只能从历史显式恢复。
+- [ ] 缺 `baseProfileVer` 的普通上传/删除必须判冲突，不能退化成无条件覆盖。
+- [ ] 单玩家回滚 A 时，B 的未上传改动仍在 `__pvzPending` 里；重放只带 B，
+      不会把 A 又传一遍。
+- [ ] 换 authentik 账号后重新进游戏：上一账号的本地存档与待上传队列被归档到
+      `__pvzUserSave_<旧账号>_*` / `__pvzUserState_<旧账号>_*`，新账号启动时
+      不会把旧账号进度传上去。
+- [ ] `/_save/api/load` 失败（断网/令牌失效）时，启动流程只保留 pending，
+      不上传；恢复后重新进入游戏才重放。
 
 ## 4. 存储位置：迁移与门禁（P1）
 

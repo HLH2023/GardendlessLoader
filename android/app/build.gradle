@@ -70,4 +70,7 @@ dependencies {
     // FileProvider, for handing a downloaded APK to the system installer.
     implementation "androidx.core:core:1.13.1"
     testImplementation "junit:junit:4.13.2"
+    // Android's android.jar ships stub org.json that throws in JVM unit tests;
+    // the real implementation keeps JSON parsing tests meaningful.
+    testImplementation "org.json:json:20240303"
 }
