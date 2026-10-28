@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "project": "GardendlessLoader",
-  "updatedAt": "2026-10-28T21:55:00+08:00",
+  "updatedAt": "2026-10-28T22:05:00+08:00",
   "updatedBy": "orchestrator/opencode",
   "release": {
     "versionName": "0.9.0-hlh.35",
@@ -3278,6 +3278,12 @@
       "by": "orchestrator/opencode",
       "event": "released",
       "summary": "hlh.35：修桌面端快捷键不响应——CEF 的 event.code 为空 + Cocos 按 code 映射到 #GameCanvas；页面校正层重派发并去重。新增 check_keyboard_script 10 项，基线 1305；APK 58,652,226 B / Windows 190,980,540 B，双 manifest latest=hlh.35，Release v0.9.0-hlh.35；用户确认生效"
+    },
+    {
+      "at": "2026-10-28T22:05:00+08:00",
+      "by": "orchestrator/opencode",
+      "event": "committed",
+      "summary": "hlh.25–hlh.35 已提交并推送：GardendlessLoader 5ee2aaa（代码）+ ab3387a（文档）→ origin/feature/app-update 与 private/main；pvzge-server 8a5e343 → pvzge/main；Release tag v0.9.0-hlh.35 已指到 ab3387a"
     }
   ]
 }

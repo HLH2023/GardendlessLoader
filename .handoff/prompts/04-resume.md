@@ -36,9 +36,9 @@ cat .handoff/HANDOFF.md          # 主文档：当前状态、任务、验收、
   「用云端存档（覆盖本机并重启）」点了没反应——CEF 离屏渲染没有 JS 对话框，
   `confirm()` 恒 false。已改成页面内二次确认（`save-api/ui.js`、`conflict.html`、
   `admin.html` 的 6 个破坏性动作），`tools/deploy-static.sh` 已部署并通过 `--check`。
-- 工作树**未提交**：最后一次提交是 hlh.24 的 `4a22a6f`；hlh.25–hlh.35 的改动
-  仍在工作树（约 52 改 / 20 新 / 3 删）。服务端仓 `/home/hlh/pvzge` 另有
-  13 处未提交改动。发版走本地产物 + 服务端分发目录，与 git 提交无强绑定。
+- 工作树**已提交**：`5ee2aaa`（hlh.25–hlh.35 代码）+ `ab3387a`（交接文档），
+  已推 `origin/feature/app-update` 与 `private/main`；服务端仓 `/home/hlh/pvzge`
+  提交 `8a5e343` 已推 `pvzge/main`。发版走本地产物 + 服务端分发目录。
 
 ## 刚做完的两件事（别重做）
 
@@ -79,7 +79,7 @@ cat .handoff/HANDOFF.md          # 主文档：当前状态、任务、验收、
    磁盘缓存补丁）未做。
 5. 用户安装目录的旧版本备份 `D:\Program Files\gardendless-loader.backup`
    （440 MB）待用户确认后删除。
-6. 两个仓库都未提交；提交前先看 `docs/02-branches.md` 的推送纪律。
+6. 两仓已提交到 hlh.35；下次改动前先看 `docs/02-branches.md` 的推送纪律。
 
 ## 硬约束（违反会直接造成损失）
 
