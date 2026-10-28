@@ -21,12 +21,22 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 
 服务端另有一个私有仓 `HLH2023/pvzge-server`（存档 API + 网关脚本），不在本仓库内。
 
-## 2. 当前状态（hlh.36 已发布，等用户实测）
+## 2. 当前状态（hlh.38 已发布，等用户实测）
 
+- **hlh.38 安卓后台暂停/静音（已发布）**：新增 `media_lifecycle.js`，切后台时
+  暂停 HTMLAudio 池（游戏音频不挂 DOM）、suspend WebAudio，并派发 `window blur`
+  触发游戏自己的暂停菜单；回前台只恢复当时在播的媒体。APK 58,653,811 B
+  （`ef05f643…`）、Windows zip 190,088,476 B（`6cae97a1…`），两份清单
+  latest=`0.9.0-hlh.38`/90038，Release `v0.9.0-hlh.38`（id 426995104）。
+  根因/断言见 B-82；Windows 侧无行为变化，仅同步版本。
+- **hlh.37 首页个人构建更新检查（已发布）**：首页「检查更新」的加载器分支
+  改读服务端清单（Windows win 清单 / 安卓 APK 清单），设置红点与提示同步；
+  上游信息仍保留在 Loader 卡片。APK 58,652,218 B（`eff603c9…`）、Windows zip
+  190,086,981 B（`d6964052…`），Release `v0.9.0-hlh.37`（id 426987044）。
+  根因/断言见 B-81。
 - **hlh.36 性能轮（已发布）**：APK 58,652,214 B（`ecbe7fac…`）与 Windows x64
-  zip 190,082,823 B（`21e6dc08…`），同为 90036。两份清单 latest 均为
-  `0.9.0-hlh.36` / 90036，GitHub Release `v0.9.0-hlh.36`（id 426971345，
-  tag 指向 `eee66f7`）。三处改动：
+  zip 190,082,823 B（`21e6dc08…`），同为 90036；两份清单 latest 均为
+  `0.9.0-hlh.36` / 90036，Release `v0.9.0-hlh.36`（id 426971345）。三处改动：
   ① vendor `webview_cef`，vsync 改按窗口所在显示器选 DXGI output（找不到就按该屏
   刷新率兜底，最小化不发 BeginFrame）；② 本地资源服务器给静态资源加
   ETag/Cache-Control（hashed immutable，其余 no-cache+304），HTML 仍 no-store；
@@ -264,19 +274,22 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 
 ## 3. 这次要做什么
 
-### 当前任务 R-20261029-01：桌面/安卓性能轮（hlh.36，等用户实测）
+### 当前任务 R-20261029-01：性能轮 + 首页更新检查 + 安卓后台暂停（hlh.38，等实测）
 
-标题：**vsync 跟随窗口显示器 + 资源缓存 + 主帧过滤 + 安卓后台暂停**
+标题：**vsync 跟随窗口显示器 + 资源缓存 + 首页个人构建更新 + 安卓后台暂停/静音**
 
 范围：
-- Windows：vendor `webview_cef`，vsync 源改为窗口所在显示器；最小化不发 BeginFrame。
+- Windows：vendor `webview_cef`，vsync 源改为窗口所在显示器；最小化不发 BeginFrame（hlh.36）。
 - Windows：本地资源服务器加 ETag/Cache-Control（hashed immutable，其余 no-cache+304），
-  HTML 保持 no-store。
-- Windows：`onLoadEnd` 只对本地 origin 主文档重装桥，广告/统计 iframe 不触发。
-- Android：`onPause` / `onResume` 暂停/恢复 WebView。
+  HTML 保持 no-store（hlh.36）。
+- Windows：`onLoadEnd` 只对本地 origin 主文档重装桥（hlh.36）。
+- 首页「检查更新」加载器分支改读服务端清单（Windows win / 安卓 APK），
+  设置红点与提示同步（hlh.37）。
+- Android：`media_lifecycle.js` 切后台暂停游戏并静音（HTMLAudio 池 + WebAudio +
+  `blur` 触发游戏暂停菜单），回前台恢复当时在播的媒体（hlh.38）。
 
-排除：发布清单与 GitHub Release（等用户实测）、CEF 持久磁盘缓存（B-22 范围）。
-验收见第 4 节顶部；根因与断言见 `docs/07-backlog.md` 的 B-78/B-79/B-80。
+排除：发布后的真机功能判定（用户执行）、CEF 持久磁盘缓存（B-22）。
+验收见第 4 节顶部；根因与断言见 `docs/07-backlog.md` 的 B-78～B-82。
 
 ### 上一个任务 R-20261025-04（已随 hlh.35 交付）
 
@@ -334,14 +347,14 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 
 ## 4. 验收标准（做到这些才算 done）
 
-### 当前：hlh.36 性能轮（R-20261029-01）
+### 当前：hlh.38（R-20261029-01）
 - [x] `flutter analyze` 输出 `No issues found!`
-- [x] 客户端 482/482（local-server 46、desktop-channels 69，其余套件未动且复跑通过）
-- [x] APK 90036 与 Windows zip 从最终代码重建（哈希见回执 #29）
-- [x] 两份更新清单 latest=hlh.36/90036；Release `v0.9.0-hlh.36` 含四个资产
-      （回执 #30）
-- [ ] 用户实测：数字/字母热键、F10、F11、全屏、退出、最小化恢复、整体流畅度
-- [ ] 安卓实测：切后台 → 回前台仍能继续游戏且不重载
+- [x] 客户端 489/489 实跑（新增 media-lifecycle 10、game-host 97、update-manifest 59；
+      desktop-zip 11 无 fixture 未跑）
+- [x] 两端 90038 从最终代码重建；两份清单 latest=hlh.38/90038；
+      Release `v0.9.0-hlh.38` 含四个资产（回执 #31/#32）
+- [ ] 用户实测：首页「检查更新」能看到 hlh.38；安卓切后台 → 回前台停声/暂停
+- [ ] 用户实测：热键、F10、F11、全屏、退出、最小化、整体流畅度（hlh.36/37 回归）
 
 ### 上一个任务 R-20261025-04（已完成）
 

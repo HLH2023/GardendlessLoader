@@ -1,27 +1,27 @@
 {
   "schemaVersion": 1,
   "project": "GardendlessLoader",
-  "updatedAt": "2026-10-29T01:22:00+08:00",
+  "updatedAt": "2026-10-29T01:50:00+08:00",
   "updatedBy": "orchestrator/opencode",
   "release": {
-    "versionName": "0.9.0-hlh.36",
-    "versionCode": 90036,
-    "releasedAt": "2026-10-29T01:22:00+08:00",
+    "versionName": "0.9.0-hlh.38",
+    "versionCode": 90038,
+    "releasedAt": "2026-10-29T01:50:00+08:00",
     "apk": {
-      "file": "gardendless-loader-0.9.0-hlh.36.apk",
-      "size": 58652214,
-      "sha256": "ecbe7fac1d9872d94262e5b9f3c072716b6e807d551204d3c4669675b77567a6"
+      "file": "gardendless-loader-0.9.0-hlh.38.apk",
+      "size": 58653811,
+      "sha256": "ef05f643539113b47f4ad02df82a85d33ac8c842a0635c594460d7ff1ed43924"
     },
     "windows": {
-      "file": "gardendless-loader-0.9.0-hlh.36-90036-windows-x64.zip",
-      "size": 190082823,
-      "sha256": "21e6dc08d981899dbfae0d2a6f0af0b93a5d4413a6a24f27afa38f8d07d19711"
+      "file": "gardendless-loader-0.9.0-hlh.38-90038-windows-x64.zip",
+      "size": 190088476,
+      "sha256": "6cae97a1ee33fecc95fac7e513283671827b8d0bb31d224f10383aff2d1266e1"
     },
-    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.36",
-    "releaseId": 426971345,
+    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.38",
+    "releaseId": 426995104,
     "manifests": {
-      "apk": "latest=0.9.0-hlh.36/90036",
-      "win": "latest=0.9.0-hlh.36/90036"
+      "apk": "latest=0.9.0-hlh.38/90038",
+      "win": "latest=0.9.0-hlh.38/90038"
     }
   },
   "branches": {
@@ -48,8 +48,8 @@
   },
   "tests": {
     "server": 828,
-    "client": 482,
-    "total": 1310,
+    "client": 500,
+    "total": 1328,
     "suites": [
       {
         "name": "server/cloud-saves",
@@ -104,12 +104,12 @@
       {
         "name": "client/game-host-contract",
         "cmd": "dart run tool/check_game_host_contract.dart",
-        "count": 94
+        "count": 97
       },
       {
         "name": "client/update-manifest",
         "cmd": "dart run tool/check_update_manifest.dart",
-        "count": 54
+        "count": 59
       },
       {
         "name": "client/windows-update-result",
@@ -137,6 +137,11 @@
         "count": 23
       },
       {
+        "name": "client/media-lifecycle",
+        "cmd": "node tool/check_media_lifecycle.mjs",
+        "count": 10
+      },
+      {
         "name": "client/cloud-saves",
         "cmd": "dart run --define=PVZGE_SERVER=... tool/check_cloud_saves.dart",
         "count": 9
@@ -146,7 +151,7 @@
   },
   "task": {
     "id": "R-20261029-01",
-    "title": "桌面/安卓性能轮：vsync 跟随窗口显示器 + 资源缓存 + 主帧过滤 + 安卓后台暂停",
+    "title": "性能轮 + 首页个人构建更新检查 + 安卓后台暂停静音",
     "status": "review",
     "dispatchedAt": "2026-10-29T01:05:00+08:00",
     "dispatchedBy": "user",
@@ -157,8 +162,9 @@
       "Windows: vendor webview_cef，vsync 源改为窗口所在显示器；最小化不发 BeginFrame",
       "Windows: 本地资源服务器加 ETag/Cache-Control（hashed immutable，其余 no-cache+304），HTML 保持 no-store",
       "Windows: onLoadEnd 只对本地 origin 主文档重装桥，忽略广告/统计 iframe",
-      "Android: GameActivity onPause/onResume 暂停/恢复 WebView",
-      "双端同 versionCode 构建（hlh.36 / 90036）供用户手动测试"
+      "首页「检查更新」的加载器分支改读服务端清单（Windows win / Android APK），设置红点与提示同步；上游信息保留在 Loader 卡片",
+      "Android: 切后台暂停游戏并静音（HTMLAudio 池 + WebAudio + blur 触发游戏暂停菜单），回前台恢复当时在播的媒体",
+      "双端同 versionCode 构建（hlh.38 / 90038）并发布"
     ],
     "outOfScope": [
       "改动 upstream(Dey410) 分支或向上游提 PR",
@@ -166,7 +172,7 @@
       "发布 APK/Windows 清单与 GitHub Release（等用户手动测试后）",
       "为 CEF 配置持久磁盘缓存（B-22 范围，需单独设计）"
     ],
-    "lastReceiptAt": "2026-10-29T01:22:00+08:00"
+    "lastReceiptAt": "2026-10-29T01:50:00+08:00"
   },
   "receipts": [
     {
@@ -3030,6 +3036,89 @@
         "CEF 未配置持久磁盘缓存（B-22）"
       ],
       "needsHermes": []
+    },
+    {
+      "taskId": "R-20261029-01",
+      "by": "orchestrator/opencode",
+      "at": "2026-10-29T01:36:00+08:00",
+      "status": "review",
+      "readBack": {
+        "taskTitle": "桌面/安卓性能轮 + 首页个人构建更新检查",
+        "versionBefore": "0.9.0-hlh.36+90036",
+        "testsBaseline": 1310
+      },
+      "changed": [
+        "首页「检查更新」新增个人构建分支：Windows 读 win 清单，安卓读 APK 清单；未登录静默跳过",
+        "checkAppUpdate/checkWindowsUpdate 增加 prepareDownload/reportFailure；首页只判版本，不哈希已下载包",
+        "设置红点与新版本提示同步；check_update_manifest 54→59",
+        "发布 hlh.37（APK + Windows zip + 两份清单 + Release）"
+      ],
+      "commands": [
+        "dart run tool/check_update_manifest.dart -> 59 通过 / 0 失败",
+        "bash tools/build-apk.sh --release -> Built app-release.apk (58.7MB)，versionCode=90037",
+        "Windows build-windows.ps1 -> zip 190,086,981 B",
+        "publish-apk.sh / publish-windows.sh -> 两份清单 latest=0.9.0-hlh.37/90037",
+        "REST release -> 426987044 / v0.9.0-hlh.37（四个资产）"
+      ],
+      "tests": {
+        "total": 1315,
+        "run": 476,
+        "server": 828,
+        "client": 487,
+        "note": "hlh.37 客户端 476 实跑（desktop-zip 11 无 fixture 未跑）；服务端未动。"
+      },
+      "artifacts": [
+        "APK 0.9.0-hlh.37 58,652,218 B sha256 eff603c9bd92d4899cdd14ac2ae61a151899200d03f0b2b4a6fb34f85024247c",
+        "Windows zip 0.9.0-hlh.37 190,086,981 B sha256 d6964052620e043a75b54c3f08670936a09ae73ec986b6a1a53d390906c95935",
+        "GitHub Release v0.9.0-hlh.37 id 426987044"
+      ],
+      "remaining": [
+        "用户实测首页检查更新能看到 hlh.37/38"
+      ],
+      "needsHermes": []
+    },
+    {
+      "taskId": "R-20261029-01",
+      "by": "orchestrator/opencode",
+      "at": "2026-10-29T01:50:00+08:00",
+      "status": "review",
+      "readBack": {
+        "taskTitle": "性能轮 + 首页个人构建更新检查 + 安卓后台暂停静音",
+        "versionBefore": "0.9.0-hlh.37+90037",
+        "testsBaseline": 1315
+      },
+      "changed": [
+        "新增 assets/game_bridge/media_lifecycle.js：登记所有 HTML 媒体（音频池不挂 DOM）与 AudioContext；暂停时派发 blur、pause 媒体、suspend 上下文；恢复时只恢复当时在播的媒体",
+        "GameActivity.onPause 先 __gardendlessHostPause 再 webView.onPause；onResume 先 webView.onResume 再 __gardendlessHostResume",
+        "注入清单加入 media_lifecycle.js；新增 check_media_lifecycle.mjs 10 项；check_game_host_contract 94→97",
+        "发布 hlh.38（APK + Windows zip + 两份清单 + Release）"
+      ],
+      "commands": [
+        "node tool/check_media_lifecycle.mjs -> 10 通过 / 0 失败",
+        "dart run tool/check_game_host_contract.dart -> 97 通过 / 0 失败",
+        "flutter analyze -> No issues found!",
+        "bash tools/build-apk.sh --release -> versionCode=90038，APK 含 media_lifecycle.js",
+        "Windows build-windows.ps1 -> zip 190,088,476 B",
+        "publish-apk.sh / publish-windows.sh -> 两份清单 latest=0.9.0-hlh.38/90038",
+        "REST release -> 426995104 / v0.9.0-hlh.38（四个资产）"
+      ],
+      "tests": {
+        "total": 1328,
+        "run": 489,
+        "server": 828,
+        "client": 500,
+        "note": "hlh.38 客户端 489 实跑（desktop-zip 11 无 fixture 未跑）；服务端 828 代码未动、沿用基线。"
+      },
+      "artifacts": [
+        "APK 0.9.0-hlh.38 58,653,811 B sha256 ef05f643539113b47f4ad02df82a85d33ac8c842a0635c594460d7ff1ed43924",
+        "Windows zip 0.9.0-hlh.38 190,088,476 B sha256 6cae97a1ee33fecc95fac7e513283671827b8d0bb31d224f10383aff2d1266e1",
+        "GitHub Release v0.9.0-hlh.38 id 426995104"
+      ],
+      "remaining": [
+        "真机切后台→回前台复测停声与暂停菜单；若游戏内「自动暂停」关闭，只会静音/冻结（尊重游戏设置）",
+        "用户实测首页检查更新能看到 hlh.38"
+      ],
+      "needsHermes": []
     }
   ],
   "handoffLog": [
@@ -3399,6 +3488,20 @@
       "event": "release",
       "task": "R-20261029-01",
       "note": "hlh.36 已发布：APK/win 清单 latest=90036，Release 426971345"
+    },
+    {
+      "at": "2026-10-29T01:36:00+08:00",
+      "by": "orchestrator/opencode",
+      "event": "release",
+      "task": "R-20261029-01",
+      "note": "hlh.37 发布：首页个人构建更新检查（Release 426987044）"
+    },
+    {
+      "at": "2026-10-29T01:50:00+08:00",
+      "by": "orchestrator/opencode",
+      "event": "release",
+      "task": "R-20261029-01",
+      "note": "hlh.38 发布：安卓后台暂停/静音（Release 426995104）"
     }
   ]
 }

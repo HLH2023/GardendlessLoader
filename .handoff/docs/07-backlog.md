@@ -103,6 +103,37 @@
 
 ## 已关闭
 
+`B-82 安卓切后台游戏不停声、也不弹暂停 → 已修（2026-10-29，P1，Android + 注入脚本，hlh.38）→
+现象：hlh.36/37 切到后台后音乐继续播，回到前台游戏照常跑；只看得到画面冻结（如果有）。
+根因：`WebView.onPause()` 只停布局/解析/JS 计时器，不碰音频。游戏的音频是
+`game-audio.js` 里一个**不挂 DOM** 的 HTMLAudio 池（`querySelectorAll('audio')` 找不到），
+自动暂停又只绑在 `window blur` 上（`tmppatch.js` 的 `electronAPI.onWindowUnfocused`），
+Android 切后台不会派发 blur。
+修法：新增 `assets/game_bridge/media_lifecycle.js`（document-start）：
+1. patch `HTMLMediaElement.prototype.play` 登记所有媒体元素，包 `AudioContext` 记录实例；
+2. `__gardendlessHostPause()`：派发 `blur`（让游戏弹自己的暂停菜单）+ pause 正在播的媒体
+   + suspend 运行中的 AudioContext；
+3. `__gardendlessHostResume()`：派发 `focus`，只恢复进入后台时正在播的媒体/上下文，
+   用户自己暂停的音效不会被自动恢复。
+`GameActivity.onPause` 先调用 `__gardendlessHostPause` 再 `webView.onPause()`；
+`onResume` 先 `webView.onResume()` 再 `__gardendlessHostResume()`。
+断言：新增 `check_media_lifecycle.mjs` **10** 项；`check_game_host_contract` 94→**97**
+（注入清单、onPause/onResume 调用顺序）。
+残余：真机切后台→回前台复测。若游戏内「自动暂停」开关关闭，只会静音/冻结，
+不会弹暂停菜单（尊重游戏设置，不强行改）。`
+
+`B-81 首页「检查更新」永远看不到个人构建（查上游 GitHub 且剥离 -hlh.N）→ 已修（2026-10-29，P1，Dart，hlh.37）→
+现象：服务端清单已经发布 hlh.36，点首页「检查更新」仍显示「已是最新」；设置页「应用内更新」却能看到。
+根因：`_checkAppForUpdate` 请求 `api.github.com/repos/Dey410/GardendlessLoader/releases/latest`
+（上游主线），`_normalizeVersion` 又把 `0.9.0-hlh.36` 截成 `0.9.0`，正好等于上游 `v0.9.0`；
+个人构建在私有仓库里，客户端也没有 GitHub 凭据，这条路径结构上不可能发现个人版本。
+修法：新增 `_checkPersonalAppUpdate()`，复用设置页的 `checkAppUpdate`（服务端 APK 清单，
+Bearer 设备令牌）；未登录时静默跳过；`prepareDownload:false` 只判版本、不哈希已下载文件；
+首页设置红点与「新版本…可在设置页的更新入口下载」提示同时反映个人构建（Windows 走 win 清单，其它平台走 APK 清单）。上游 Loader
+卡片保留（仍明确标注「上游」），已登录时不再由它决定「加载器检查是否成功」。
+断言：`check_update_manifest` 54→59（首页分支、复用 checkAppUpdate、Windows 走 win 清单、平台提示、红点）。
+残余：真机点一次首页检查更新，确认提示出现。
+
 `B-78 桌面端 vsync 源固定 adapter 0 / output 0，多屏与虚拟显示器下帧节奏对不上 → 已修（2026-10-29，P1，vendored webview_cef，hlh.36）→
 现象：窗口在 1024×768 虚拟显示器（GameViewer / MuMu），而 adapter 0 的第 0 个输出是
 NVIDIA 2560×1440@179；BeginFrame 按 179 Hz 发，实际显示 60 Hz，表现为「帧数够但看着不顺」，
