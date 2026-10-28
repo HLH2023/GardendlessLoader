@@ -179,6 +179,7 @@ class GameActivity : Activity() {
             add("export_download_patch.js")
             add("watermark.js")
             add("gesture_hint.js")
+            add("media_lifecycle.js")
         }
         return buildString {
             append("window.__gardendlessHostConfig=")
@@ -517,17 +518,31 @@ class GameActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // 与 onPause 成对：把 WebView 从后台计时器节流/暂停里放回来。
-        if (::webView.isInitialized) webView.onResume()
+        // 与 onPause 成对：先解除 WebView 的暂停，再恢复被宿主暂停的媒体。
+        // 游戏的暂停菜单不会自动收起，仍由玩家点「继续」。
+        if (::webView.isInitialized) {
+            webView.onResume()
+            webView.evaluateJavascript(
+                "(function(){try{if(window.__gardendlessHostResume)window.__gardendlessHostResume();}catch(e){}})()",
+                null,
+            )
+        }
         resumedAt = SystemClock.elapsedRealtime()
         logLifecycle("resumed")
     }
 
     override fun onPause() {
         super.onPause()
-        // 切后台（含系统暗屏）时暂停 WebView 的 JS 计时器与渲染：
-        // 不主动暂停的话游戏会继续跑主循环，白白耗电发热。
-        if (::webView.isInitialized) webView.onPause()
+        if (::webView.isInitialized) {
+            // 先让页面暂停游戏并静音（HTMLAudio + WebAudio），再暂停 WebView
+            // 的计时器。游戏把失焦暂停绑在 window blur 上；音频池不挂 DOM，
+            // 只停计时器不会停声。
+            webView.evaluateJavascript(
+                "(function(){try{if(window.__gardendlessHostPause)window.__gardendlessHostPause();}catch(e){}})()",
+                null,
+            )
+            webView.onPause()
+        }
         if (resumedAt != 0L) playedMs += SystemClock.elapsedRealtime() - resumedAt
         resumedAt = 0L
         logLifecycle("paused")

@@ -870,6 +870,24 @@ void main() {
           .hasMatch(iosLogStore),
       null);
 
+  // 安卓切后台：WebView.onPause() 只停计时器，不碰不挂 DOM 的 HTMLAudio 池；
+  // 游戏的自动暂停又只认 window blur。两条都必须由宿主显式触发，顺序也不能反。
+  final activity = File(
+          'android/app/src/main/kotlin/io/github/dey410/gardendlessloader/game/GameActivity.kt')
+      .readAsStringSync();
+  check('GameActivity 注入 media_lifecycle.js',
+      activity.contains('add("media_lifecycle.js")'), null);
+  final pauseHook = activity.indexOf('__gardendlessHostPause');
+  final webPause = activity.indexOf('webView.onPause()');
+  final resumeHook = activity.indexOf('__gardendlessHostResume');
+  final webResume = activity.indexOf('webView.onResume()');
+  check('onPause 先暂停页面再暂停 WebView', pauseHook >= 0 && webPause > pauseHook,
+      '$pauseHook < $webPause');
+  check(
+      'onResume 先恢复 WebView 再恢复媒体',
+      resumeHook >= 0 && webResume >= 0 && webResume < resumeHook,
+      '$webResume < $resumeHook');
+
   stdout.writeln('\n结果：$passed 通过 / $failed 失败');
   exit(failed == 0 ? 0 : 1);
 }
