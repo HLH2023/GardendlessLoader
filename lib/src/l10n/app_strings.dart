@@ -433,6 +433,9 @@ class AppStrings {
       _t('已是最新（$version / $build）', 'Up to date ($version / $build)');
   String appUpdateAvailable(String version, String build) =>
       _t('新版本 $version（$build）', 'Version $version ($build)');
+  String appUpdateAvailableHint(String version, String build) => _t(
+      '新版本 $version（$build），可在设置页的更新入口下载',
+      'Version $version ($build) — open the update section in Settings');
   String get appUpdateNotes => _t('更新说明', 'Release notes');
   String get appUpdatePackage => _t('安装包', 'Package');
   String get appUpdateDownload => _t('下载安装包', 'Download');

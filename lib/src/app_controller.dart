@@ -163,6 +163,7 @@ class AppController extends ChangeNotifier {
   String? _latestGameVersion;
   bool _currentGameVersionIsAhead = false;
   bool _appUpdateDetected = false;
+  bool _personalAppUpdateDetected = false;
   bool _gameUpdateDetected = false;
   bool _updateCheckInProgress = false;
   AppSettings _appSettings = const AppSettings();
@@ -216,6 +217,12 @@ class AppController extends ChangeNotifier {
   AboutContent get aboutContent => _aboutContent;
   UpdateInfo? get availableUpdate => _availableUpdate;
   GameUpdateInfo? get availableGameUpdate => _availableGameUpdate;
+
+  /// 服务端 APK 清单里有比当前安装更新的个人构建。
+  ///
+  /// 与 [availableUpdate]（上游主线）分开：首页「检查更新」现在两路都查，
+  /// 个人构建的下载安装仍走设置页的「应用内更新」。
+  bool get personalAppUpdateDetected => _personalAppUpdateDetected;
   String get currentAppVersion => _currentAppVersion;
 
   /// Installed versionName exactly as packaged (`0.9.0-hlh.1`), for the
@@ -1412,9 +1419,15 @@ class AppController extends ChangeNotifier {
       final results = await Future.wait([
         _checkAppForUpdate(),
         _checkGameForUpdate(),
+        _checkPersonalAppUpdate(),
       ]);
       if (!silent) {
-        final appSucceeded = results[0];
+        // 个人构建线的权威加载器更新来自服务端清单；已登录时不再用上游
+        // GitHub 的结果判断「加载器是否检查成功」。
+        final personalChannel =
+            _appSettings.effectiveServerBaseUrl.isNotEmpty &&
+                _appSettings.deviceToken.trim().isNotEmpty;
+        final appSucceeded = personalChannel ? results[2] : results[0];
         final gameSucceeded = results[1];
         final strings = AppStrings.current;
         if (!appSucceeded && !gameSucceeded) {
@@ -1432,7 +1445,9 @@ class AppController extends ChangeNotifier {
             strings.updateCheckFailedGame,
             'update_check_failed',
           );
-        } else if (!_appUpdateDetected && !_gameUpdateDetected) {
+        } else if (!_appUpdateDetected &&
+            !_gameUpdateDetected &&
+            !_personalAppUpdateDetected) {
           final currentGameVersion = _currentGameVersion;
           if (currentGameVersion == null) {
             _message = LauncherMessage(strings.loaderLatestGameUnknown(
@@ -1449,6 +1464,20 @@ class AppController extends ChangeNotifier {
           } else {
             _message = LauncherMessage(
               strings.bothUpToDate(_currentAppVersion, currentGameVersion),
+            );
+          }
+        } else if (_personalAppUpdateDetected) {
+          // Windows 的个人更新在 win 清单里，其它能应用内安装的平台在 APK 清单里。
+          final version = Platform.isWindows
+              ? _windowsUpdate.release?.version
+              : _appUpdate.release?.version;
+          final versionCode = Platform.isWindows
+              ? _windowsUpdate.release?.versionCode
+              : _appUpdate.release?.versionCode;
+          if (version != null && versionCode != null) {
+            _message = LauncherMessage(
+              strings.appUpdateAvailableHint(version, '$versionCode'),
+              'app_update_available',
             );
           }
         }
@@ -1474,6 +1503,55 @@ class AppController extends ChangeNotifier {
     } catch (_) {
       return false;
     }
+  }
+
+  /// 个人构建的加载器检查：读服务端 APK 清单（与设置页「应用内更新」同一
+  /// 来源），不再依赖上游 GitHub Release —— 上游版本号没有 `-hlh.N`，旧逻辑
+  /// 还会在比较前把它剥掉，个人构建永远收不到提示。
+  ///
+  /// 未登录时静默跳过（更新清单需要设备令牌），不算失败。
+  Future<bool> _checkPersonalAppUpdate() async {
+    final base = _appSettings.effectiveServerBaseUrl;
+    final token = _appSettings.deviceToken.trim();
+    if (base.isEmpty || token.isEmpty) {
+      _personalAppUpdateDetected = false;
+      return true;
+    }
+    if (Platform.isWindows) {
+      // 桌面的应用内更新走 win 清单，与 APK 面板是两套独立状态。
+      if (_windowsUpdate.phase == AppUpdatePhase.checking ||
+          _windowsUpdate.active ||
+          _windowsUpdate.phase == AppUpdatePhase.ready) {
+        _personalAppUpdateDetected = _windowsUpdate.release != null;
+        return true;
+      }
+      final ok = await checkWindowsUpdate(
+        prepareDownload: false,
+        reportFailure: false,
+      );
+      _personalAppUpdateDetected = ok &&
+          (_windowsUpdate.phase == AppUpdatePhase.available ||
+              _windowsUpdate.phase == AppUpdatePhase.ready);
+      return ok;
+    }
+    if (!_appInstallService.supported) {
+      // iOS / 鸿蒙 / Linux / macOS：没有应用内安装通道。
+      _personalAppUpdateDetected = false;
+      return true;
+    }
+    // 正在下载/校验/安装，或已经准备好待安装的包时，不要用一次检查覆盖。
+    if (_appUpdate.phase == AppUpdatePhase.checking ||
+        _appUpdate.active ||
+        _appUpdate.phase == AppUpdatePhase.ready) {
+      _personalAppUpdateDetected = _appUpdate.release != null;
+      return true;
+    }
+    final ok =
+        await checkAppUpdate(prepareDownload: false, reportFailure: false);
+    _personalAppUpdateDetected = ok &&
+        (_appUpdate.phase == AppUpdatePhase.available ||
+            _appUpdate.phase == AppUpdatePhase.ready);
+    return ok;
   }
 
   Future<bool> _checkGameForUpdate({bool reuseLatestVersion = false}) async {
@@ -2937,23 +3015,35 @@ class AppController extends ChangeNotifier {
 
   /// Fetches the APK manifest with the device token and compares its
   /// versionCode with the installed build.
-  Future<void> checkAppUpdate() async {
+  /// Fetches the APK manifest with the device token and compares its
+  /// versionCode with the installed build.
+  ///
+  /// [prepareDownload] 为 false 时只判断有没有新版，不统计/校验已下载的
+  /// 部分文件；首页的静默检查走这条路径，避免每次启动都哈希几十 MB。
+  /// [reportFailure] 为 false 时失败不覆盖设置页已有的更新状态。
+  Future<bool> checkAppUpdate({
+    bool prepareDownload = true,
+    bool reportFailure = true,
+  }) async {
     if (_appUpdate.phase == AppUpdatePhase.checking || _appUpdate.active) {
-      return;
+      return true;
     }
+    final previous = _appUpdate;
     final strings = AppStrings.current;
     final base = _appSettings.effectiveServerBaseUrl;
     final token = _appSettings.deviceToken.trim();
     if (base.isEmpty || token.isEmpty) {
-      _appUpdate = AppUpdateStatus(
-        phase: AppUpdatePhase.failed,
-        release: _appUpdate.release,
-        errorCode:
-            base.isEmpty ? 'save_server_invalid' : 'app_update_not_signed_in',
-        message: strings.saveServerNotConfigured,
-      );
-      notifyListeners();
-      return;
+      if (reportFailure) {
+        _appUpdate = AppUpdateStatus(
+          phase: AppUpdatePhase.failed,
+          release: _appUpdate.release,
+          errorCode:
+              base.isEmpty ? 'save_server_invalid' : 'app_update_not_signed_in',
+          message: strings.saveServerNotConfigured,
+        );
+        notifyListeners();
+      }
+      return false;
     }
 
     _appUpdate = AppUpdateStatus(
@@ -2980,6 +3070,12 @@ class AppController extends ChangeNotifier {
       if (!result.isUpgrade) {
         _appUpdate = AppUpdateStatus(
           phase: AppUpdatePhase.upToDate,
+          release: release,
+          totalBytes: release.size,
+        );
+      } else if (!prepareDownload) {
+        _appUpdate = AppUpdateStatus(
+          phase: AppUpdatePhase.available,
           release: release,
           totalBytes: release.size,
         );
@@ -3018,39 +3114,50 @@ class AppController extends ChangeNotifier {
           'updateAvailable': result.isUpgrade,
         },
       );
+      return true;
     } on RemoteResourceFailure catch (failure) {
-      _appUpdate = AppUpdateStatus(
-        phase: AppUpdatePhase.failed,
-        release: _appUpdate.release,
-        errorCode: failure.code,
-        message: failure.message,
-      );
-      _appLogger.emit(
-        level: LogLevel.warn,
-        category: 'app.update',
-        event: 'app_update_checked',
-        outcome: LogOutcome.failed,
-        code: failure.code,
-        message: failure.message,
-        durationMs: stopwatch.elapsedMilliseconds,
-      );
+      if (reportFailure) {
+        _appUpdate = AppUpdateStatus(
+          phase: AppUpdatePhase.failed,
+          release: _appUpdate.release,
+          errorCode: failure.code,
+          message: failure.message,
+        );
+        _appLogger.emit(
+          level: LogLevel.warn,
+          category: 'app.update',
+          event: 'app_update_checked',
+          outcome: LogOutcome.failed,
+          code: failure.code,
+          message: failure.message,
+          durationMs: stopwatch.elapsedMilliseconds,
+        );
+      } else {
+        _appUpdate = previous;
+      }
+      return false;
     } catch (error, stackTrace) {
-      _appUpdate = AppUpdateStatus(
-        phase: AppUpdatePhase.failed,
-        release: _appUpdate.release,
-        errorCode: 'app_update_check_failed',
-        message: '$error',
-      );
-      _appLogger.emit(
-        level: LogLevel.error,
-        category: 'app.update',
-        event: 'app_update_checked',
-        outcome: LogOutcome.failed,
-        code: 'app_update_check_failed',
-        error: error,
-        stackTrace: stackTrace,
-        durationMs: stopwatch.elapsedMilliseconds,
-      );
+      if (reportFailure) {
+        _appUpdate = AppUpdateStatus(
+          phase: AppUpdatePhase.failed,
+          release: _appUpdate.release,
+          errorCode: 'app_update_check_failed',
+          message: '$error',
+        );
+        _appLogger.emit(
+          level: LogLevel.error,
+          category: 'app.update',
+          event: 'app_update_checked',
+          outcome: LogOutcome.failed,
+          code: 'app_update_check_failed',
+          error: error,
+          stackTrace: stackTrace,
+          durationMs: stopwatch.elapsedMilliseconds,
+        );
+      } else {
+        _appUpdate = previous;
+      }
+      return false;
     } finally {
       notifyListeners();
     }
@@ -3261,21 +3368,36 @@ class AppController extends ChangeNotifier {
   // ===== Windows 更新（清单 + zip 下载 + 校验）=====
 
   /// 检查服务端是否发布了更新的 Windows 构建。
-  Future<void> checkWindowsUpdate() async {
-    if (!Platform.isWindows || _windowsUpdate.active) return;
+  /// 读 Windows 更新清单并比较版本。
+  ///
+  /// [prepareDownload] 为 false 时只判断有没有新版，不哈希已下载的 190 MB
+  /// zip；首页的检查走这条路径。[reportFailure] 为 false 时失败不覆盖
+  /// 设置页已有的状态。
+  Future<bool> checkWindowsUpdate({
+    bool prepareDownload = true,
+    bool reportFailure = true,
+  }) async {
+    if (!Platform.isWindows) return false;
+    if (_windowsUpdate.phase == AppUpdatePhase.checking ||
+        _windowsUpdate.active) {
+      return true;
+    }
+    final previous = _windowsUpdate;
     final strings = AppStrings.current;
     final base = _appSettings.effectiveServerBaseUrl;
     final token = _appSettings.deviceToken.trim();
     if (base.isEmpty || token.isEmpty) {
-      _windowsUpdate = WindowsUpdateStatus(
-        phase: AppUpdatePhase.failed,
-        errorCode: base.isEmpty
-            ? 'save_server_invalid'
-            : 'windows_update_not_signed_in',
-        message: strings.saveServerNotConfigured,
-      );
-      notifyListeners();
-      return;
+      if (reportFailure) {
+        _windowsUpdate = WindowsUpdateStatus(
+          phase: AppUpdatePhase.failed,
+          errorCode: base.isEmpty
+              ? 'save_server_invalid'
+              : 'windows_update_not_signed_in',
+          message: strings.saveServerNotConfigured,
+        );
+        notifyListeners();
+      }
+      return false;
     }
     _windowsUpdate = WindowsUpdateStatus(
       phase: AppUpdatePhase.checking,
@@ -3312,6 +3434,12 @@ class AppController extends ChangeNotifier {
           release: release,
           totalBytes: release.size,
         );
+      } else if (!prepareDownload) {
+        _windowsUpdate = WindowsUpdateStatus(
+          phase: AppUpdatePhase.available,
+          release: release,
+          totalBytes: release.size,
+        );
       } else {
         final target = _windowsUpdateService.targetFile(
           _requirePaths().downloadsDir,
@@ -3341,37 +3469,48 @@ class AppController extends ChangeNotifier {
           'updateAvailable': upgrade,
         },
       );
+      return true;
     } on RemoteResourceFailure catch (failure) {
-      _windowsUpdate = WindowsUpdateStatus(
-        phase: AppUpdatePhase.failed,
-        release: _windowsUpdate.release,
-        errorCode: failure.code,
-        message: failure.message,
-      );
-      _appLogger.emit(
-        level: LogLevel.warn,
-        category: 'app.update',
-        event: 'windows_update_checked',
-        outcome: LogOutcome.failed,
-        code: failure.code,
-        message: failure.message,
-      );
+      if (reportFailure) {
+        _windowsUpdate = WindowsUpdateStatus(
+          phase: AppUpdatePhase.failed,
+          release: _windowsUpdate.release,
+          errorCode: failure.code,
+          message: failure.message,
+        );
+        _appLogger.emit(
+          level: LogLevel.warn,
+          category: 'app.update',
+          event: 'windows_update_checked',
+          outcome: LogOutcome.failed,
+          code: failure.code,
+          message: failure.message,
+        );
+      } else {
+        _windowsUpdate = previous;
+      }
+      return false;
     } catch (error, stackTrace) {
-      _windowsUpdate = WindowsUpdateStatus(
-        phase: AppUpdatePhase.failed,
-        release: _windowsUpdate.release,
-        errorCode: 'windows_update_check_failed',
-        message: '$error',
-      );
-      _appLogger.emit(
-        level: LogLevel.error,
-        category: 'app.update',
-        event: 'windows_update_checked',
-        outcome: LogOutcome.failed,
-        code: 'windows_update_check_failed',
-        error: error,
-        stackTrace: stackTrace,
-      );
+      if (reportFailure) {
+        _windowsUpdate = WindowsUpdateStatus(
+          phase: AppUpdatePhase.failed,
+          release: _windowsUpdate.release,
+          errorCode: 'windows_update_check_failed',
+          message: '$error',
+        );
+        _appLogger.emit(
+          level: LogLevel.error,
+          category: 'app.update',
+          event: 'windows_update_checked',
+          outcome: LogOutcome.failed,
+          code: 'windows_update_check_failed',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      } else {
+        _windowsUpdate = previous;
+      }
+      return false;
     } finally {
       notifyListeners();
     }

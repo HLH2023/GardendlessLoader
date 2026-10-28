@@ -390,6 +390,36 @@ Future<void> main() async {
         null);
   }
 
+  // 首页「检查更新」的加载器分支必须走服务端个人构建清单：旧逻辑查上游
+  // GitHub，并且比较前会剥掉 `-hlh.N`，个人构建永远收不到提示
+  // （2026-10-29 实测：hlh.35 点检查更新看不到 hlh.36）。
+  final homePageFile = File('lib/src/ui/home_page.dart');
+  final homePageText =
+      homePageFile.existsSync() ? homePageFile.readAsStringSync() : '';
+  check(
+      '首页检查包含服务端个人构建分支',
+      controllerSource.contains('_checkPersonalAppUpdate()') &&
+          RegExp(r'Future\.wait\(\[[\s\S]{0,400}?_checkPersonalAppUpdate\(\)')
+              .hasMatch(controllerSource),
+      null);
+  check(
+      '个人构建检查复用 checkAppUpdate（不统计下载、不覆盖失败态）',
+      controllerSource.contains(
+          'checkAppUpdate(prepareDownload: false, reportFailure: false)'),
+      null);
+  check(
+      'Windows 首页检查走 win 清单（不哈希已下载 zip）',
+      RegExp(r'checkWindowsUpdate\([\s\S]{0,120}?prepareDownload: false')
+          .hasMatch(controllerSource),
+      null);
+  check(
+      '首页提示取平台对应的 release（Windows 用 win 清单）',
+      controllerSource.contains('_windowsUpdate.release?.version') &&
+          controllerSource.contains('_appUpdate.release?.version'),
+      null);
+  check('首页设置红点同时反映个人构建更新', homePageText.contains('personalAppUpdateDetected'),
+      null);
+
   stdout.writeln('\n结果：$passed 通过 / $failed 失败');
   exit(failed == 0 ? 0 : 1);
 }

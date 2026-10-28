@@ -738,7 +738,8 @@ class _Sidebar extends StatelessWidget {
         }
         return null;
       case LauncherDestination.settings:
-        return controller.availableUpdate == null
+        return controller.availableUpdate == null &&
+                !controller.personalAppUpdateDetected
             ? null
             : const _Dot(key: ValueKey('app-update-dot'));
       case LauncherDestination.game:
