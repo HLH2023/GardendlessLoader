@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "project": "GardendlessLoader",
-  "updatedAt": "2026-10-28T22:05:00+08:00",
+  "updatedAt": "2026-10-29T01:20+08:00",
   "updatedBy": "orchestrator/opencode",
   "release": {
     "versionName": "0.9.0-hlh.35",
@@ -47,8 +47,8 @@
   },
   "tests": {
     "server": 828,
-    "client": 477,
-    "total": 1305,
+    "client": 482,
+    "total": 1310,
     "suites": [
       {
         "name": "server/cloud-saves",
@@ -88,7 +88,7 @@
       {
         "name": "client/local-server",
         "cmd": "dart run tool/check_local_server.dart",
-        "count": 42
+        "count": 46
       },
       {
         "name": "client/storage-migration",
@@ -123,7 +123,7 @@
       {
         "name": "client/desktop-channels",
         "cmd": "dart run tool/check_desktop_channels.dart",
-        "count": 68
+        "count": 69
       },
       {
         "name": "client/keyboard-script",
@@ -144,31 +144,29 @@
     "androidJvm": 46
   },
   "task": {
-    "id": "R-20261025-04",
-    "title": "多玩家云存档 + 存档页版本来源修正 + Web 单标签页 + 删除在线游玩",
+    "id": "R-20261029-01",
+    "title": "桌面/安卓性能轮：vsync 跟随窗口显示器 + 资源缓存 + 主帧过滤 + 安卓后台暂停",
     "status": "review",
-    "dispatchedAt": "2026-10-25T21:30:00+08:00",
+    "dispatchedAt": "2026-10-29T01:05:00+08:00",
     "dispatchedBy": "user",
-    "acceptedAt": "2026-10-25T21:30:00+08:00",
+    "acceptedAt": "2026-10-29T01:05:00+08:00",
     "acceptedBy": "orchestrator/opencode",
-    "brief": "见 .handoff/HANDOFF.md 第 3 节",
+    "brief": "见 .handoff/HANDOFF.md 第 3 节 R-20261029-01",
     "scope": [
-      "云端按 uid + gameVersion + profileId 存独立玩家 JSON；游戏仍收发 PvZ2_PlayerProperties 数组",
-      "逐玩家合并/冲突/删除/历史/回滚；同名不同 uid 拒绝认领",
-      "存档页版本来源：本地资源版本 / 在线清单版本，可切换但不得混用",
-      "Web 同一浏览器只允许一个可写游戏标签页：顶层 Web Locks + 游戏 iframe；第二页在 boot 前阻断",
-      "删除启动器在线游玩模式，只保留本地资源包游玩；登录/云存档/资源下载/更新检查保留",
-      "oracle-sol 第九轮 5 条 P1：锁前 boot、blocked 迟到副作用、运行期采用云端回滚、迟到 401、guard fail closed",
-      "静态文件与 nginx uid 转发的部署说明（Hermes 执行）"
+      "Windows: vendor webview_cef，vsync 源改为窗口所在显示器；最小化不发 BeginFrame",
+      "Windows: 本地资源服务器加 ETag/Cache-Control（hashed immutable，其余 no-cache+304），HTML 保持 no-store",
+      "Windows: onLoadEnd 只对本地 origin 主文档重装桥，忽略广告/统计 iframe",
+      "Android: GameActivity onPause/onResume 暂停/恢复 WebView",
+      "双端同 versionCode 构建（hlh.36 / 90036）供用户手动测试"
     ],
     "outOfScope": [
       "改动 upstream(Dey410) 分支或向上游提 PR",
       "把个人服务器地址/令牌写入任何受版本控制的文件",
-      "重启 core 宿主机、改动 frpc(.157) 或路由 iStoreOS(.41)",
-      "真实用户存档的 uid 目录迁移（需要运维冻结窗口，B-23）",
-      "Windows CEF 磁盘缓存原生补丁与实机验证（B-22）"
+      "发布 APK/Windows 清单与 GitHub Release（等用户手动测试后）",
+      "为 CEF 配置持久磁盘缓存（B-22 范围，需单独设计）"
     ],
-    "lastReceiptAt": "2026-10-28T12:45+08:00"
+    "lastReceiptAt": "2026-10-29T01:20+08:00",
+    "pendingVersion": "0.9.0-hlh.36+90036"
   },
   "receipts": [
     {
@@ -2936,6 +2934,61 @@
         "webview_cef 的 native_key_code 仍是页面兼容层兜底；如需彻底修需 vendor 插件"
       ],
       "needsHermes": []
+    },
+    {
+      "taskId": "R-20261029-01",
+      "by": "orchestrator/opencode",
+      "at": "2026-10-29T01:20+08:00",
+      "status": "review",
+      "readBack": {
+        "taskTitle": "桌面/安卓性能轮：vsync 跟随窗口显示器 + 资源缓存 + 主帧过滤 + 安卓后台暂停",
+        "versionBefore": "0.9.0-hlh.35+90035",
+        "testsBaseline": 1305
+      },
+      "changed": [
+        "新增 packages/webview_cef（vendor 上游 0.6.2，仅改 windows/webview_cef_plugin.cpp）：vsync 线程按窗口所在显示器枚举 DXGI output，换屏自动重取，找不到 output 时用该显示器自己的刷新率兜底，IsIconic 时跳过 BeginFrame",
+        "pubspec.yaml：dependency_overrides 指向 packages/webview_cef；版本 hlh.35→hlh.36 (90036)",
+        "local_resource_server：非 HTML 静态资源加 ETag/Cache-Control（内容哈希文件名 immutable，其余 no-cache+304），HTML 保持 no-store",
+        "desktop_game_page：onLoadEnd 只对本地 origin 主文档重装桥，广告/统计 iframe 不再触发注入与补焦",
+        "GameActivity.kt：onPause/onResume 成对调用 webView.onPause()/onResume()",
+        "断言：check_local_server 42→46（hashed immutable、no-cache+ETag、304 无 body、304 保留头）；check_desktop_channels 68→69（主文档过滤）；基线 1305→1310"
+      ],
+      "commands": [
+        "flutter analyze -> No issues found!",
+        "dart run tool/check_local_server.dart -> 46 通过 / 0 失败",
+        "dart run tool/check_desktop_channels.dart -> 69 通过 / 0 失败",
+        "dart run tool/check_storage_migration.dart -> 63 通过 / 0 失败",
+        "dart run tool/check_game_host_contract.dart -> 94 通过 / 0 失败",
+        "dart run tool/check_update_manifest.dart -> 54 通过 / 0 失败",
+        "dart run tool/check_windows_update_result.dart -> 38 通过 / 0 失败",
+        "node tool/check_local_save_guard.mjs -> 65 通过 / 0 失败",
+        "node tool/check_keyboard_script.mjs -> 10 通过 / 0 失败",
+        "node tool/check_fullscreen_script.mjs -> 23 通过 / 0 失败",
+        "dart run --define=PVZGE_SERVER=... tool/check_cloud_saves.dart -> 离线断言 9 通过 / 0 失败（缺 PVZGE_TOKEN，在线部分跳过）",
+        "bash tools/build-apk.sh --release -> Built app-release.apk (58.7MB)；aapt versionCode=90036/versionName=0.9.0-hlh.36；apksigner v1/v2/v3 全 true",
+        "Windows build-windows.ps1（ssh win，最终源码）-> Built gardendless_loader.exe；dist zip 190,082,823 B",
+        "bash tools/handoff.sh verify -> 28 通过 / 0 失败 / 0 警告"
+      ],
+      "tests": {
+        "total": 1310,
+        "run": 482,
+        "server": 828,
+        "client": 482,
+        "note": "本轮只改客户端：客户端 482/482 全跑；服务端 828 未跑（代码未动，沿用基线）。check_desktop_zip 11 未跑（本机无 fixture zip），该解压器本轮未改动。"
+      },
+      "artifacts": [
+        "APK build/app/outputs/flutter-apk/app-release.apk 58,652,214 B sha256 ecbe7fac1d9872d94262e5b9f3c072716b6e807d551204d3c4669675b77567a6",
+        "Windows dist/gardendless-loader-0.9.0-hlh.36-90036-windows-x64.zip 190,082,823 B sha256 21e6dc08d981899dbfae0d2a6f0af0b93a5d4413a6a24f27afa38f8d07d19711",
+        "两端 versionName=0.9.0-hlh.36 / versionCode=90036"
+      ],
+      "remaining": [
+        "未发布：等用户手动实测通过后再发清单与 GitHub Release",
+        "用户实测项：数字/字母热键、F10、F11、全屏、退出、最小化恢复、整体流畅度",
+        "安卓实测：切后台→回前台能否继续且不重载",
+        "CEF 未配置持久磁盘缓存（B-22），跨进程重启的缓存收益未启用",
+        "多屏/串流下的帧节奏只验证了编译与构建，未做设备测量"
+      ],
+      "needsHermes": []
     }
   ],
   "handoffLog": [
@@ -3284,6 +3337,20 @@
       "by": "orchestrator/opencode",
       "event": "committed",
       "summary": "hlh.25–hlh.35 已提交并推送：GardendlessLoader 5ee2aaa（代码）+ ab3387a（文档）→ origin/feature/app-update 与 private/main；pvzge-server 8a5e343 → pvzge/main；Release tag v0.9.0-hlh.35 已指到 ab3387a"
+    },
+    {
+      "at": "2026-10-29T01:05:00+08:00",
+      "by": "orchestrator/opencode",
+      "event": "task-closed",
+      "task": "R-20261025-04",
+      "note": "hlh.35 已发布并由用户实机确认（快捷键生效）；后续性能工作另立 R-20261029-01"
+    },
+    {
+      "at": "2026-10-29T01:20+08:00",
+      "by": "orchestrator/opencode",
+      "event": "task-review",
+      "task": "R-20261029-01",
+      "note": "hlh.36 构建完成，等待用户手动实测"
     }
   ]
 }

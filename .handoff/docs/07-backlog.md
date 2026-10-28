@@ -103,6 +103,42 @@
 
 ## 已关闭
 
+`B-78 桌面端 vsync 源固定 adapter 0 / output 0，多屏与虚拟显示器下帧节奏对不上 → 已修（2026-10-29，P1，vendored webview_cef，hlh.36）→
+现象：窗口在 1024×768 虚拟显示器（GameViewer / MuMu），而 adapter 0 的第 0 个输出是
+NVIDIA 2560×1440@179；BeginFrame 按 179 Hz 发，实际显示 60 Hz，表现为「帧数够但看着不顺」，
+最小化后也继续按刷新率空转。
+根因：`webview_cef 0.6.2` 的 vsync 线程用 `EnumAdapters1(0)` + `EnumOutputs(0)` 等 vblank，
+那不是窗口所在的那块屏。
+修法：把包 vendor 到 `packages/webview_cef`（`dependency_overrides`），只改
+`windows/webview_cef_plugin.cpp`：`PickVsyncWindow()` 选前台窗口，
+`MonitorFromWindow()` 取 HMONITOR，遍历所有适配器/输出按
+`DXGI_OUTPUT_DESC.Monitor` 精确匹配；换屏自动重取；找不到 output 时用该显示器自己的
+`EnumDisplaySettings` 刷新率兜底；`IsIconic` 时跳过 BeginFrame。
+断言：Windows 构建通过（hlh.36）；原生行为本机无自动断言，
+关联 Dart 断言见 `check_local_server` 46 项、`check_desktop_channels` 69 项。
+残余：需实机在多屏/串流/最小化三种情况下复核手感；升级上游时要重新打补丁（见
+`packages/webview_cef/VENDORED.md`）。
+
+`B-79 Windows 静态资源全部 no-store；CEF 对广告 iframe 也重装桥 → 已修（2026-10-29，P2，hlh.36）→
+现象：资源包 2025.9 MB / 8252 文件，每次进游戏都从磁盘重读；`onLoadEnd` 对广告/统计
+iframe 也执行全屏/键盘注入与 1.2 秒补焦，广告刷新时还会抢一次画布焦点。
+根因：`LocalResourceServer._serve` 只给 HTML 设 `no-store`，其余资源没有任何缓存头；
+`onLoadEnd` 不区分主文档与子 frame。
+修法：带内容哈希的文件名（Cocos 产物常见）`public, max-age=31536000, immutable`；
+其余 `no-cache` + ETag，命中返回 304；HTML 仍 `no-store`（每次请求都要重写注入内容）；
+`onLoadEnd` 只认本地服务器 origin 的主文档。
+断言：`check_local_server` 42→46（hashed immutable、no-cache+ETag、304 无 body、304 保留
+ETag/Cache-Control）；`check_desktop_channels` 68→69（主文档过滤）。
+残余：CEF 没设 `cache_path`，HTTP 缓存只在进程内有效；跨进程重启的收益要与 B-22 一起
+在 vendor 里配持久 cache 目录，本轮不做。
+
+`B-80 安卓切后台后 WebView 主循环继续跑 → 已修（2026-10-29，P2，Android，hlh.36）→
+现象：`GameActivity.onPause` 只记录生命周期日志，没有暂停 WebView；切后台/暗屏后
+JS 计时器与 rAF 继续跑，白耗电发热。
+修法：`onPause` / `onResume` 成对调用 `webView.onPause()` / `webView.onResume()`。
+断言：APK 构建通过（hlh.36）；无自动化断言。
+残余：真机「切后台 → 回前台」复测，确认游戏能继续且不重载。
+
 `B-00 Windows 本地 ZIP 导入不可用 → 自写 StreamingZip（`tool/check_desktop_zip.dart` 11 项 + `stress_real_pack`）`
 
 `B-06 管理页 5 s 轮询没有 visibilitychange → 后台标签页停止轮询、切回立即补一次刷新

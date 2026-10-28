@@ -21,8 +21,16 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 
 服务端另有一个私有仓 `HLH2023/pvzge-server`（存档 API + 网关脚本），不在本仓库内。
 
-## 2. 当前状态（截至 hlh.35）
+## 2. 当前状态（hlh.35 已发布；hlh.36 本地构建待实测）
 
+- **hlh.36 性能轮（未发布，等用户实测）**：APK 58,652,214 B（`ecbe7fac…`）与
+  Windows x64 zip 190,082,823 B（`21e6dc08…`），同为 90036。三处改动：
+  ① vendor `webview_cef`，vsync 改按窗口所在显示器选 DXGI output（找不到就按该屏
+  刷新率兜底，最小化不发 BeginFrame）；② 本地资源服务器给静态资源加
+  ETag/Cache-Control（hashed immutable，其余 no-cache+304），HTML 仍 no-store；
+  ③ `onLoadEnd` 只对本地 origin 主文档重装桥。安卓另加 `onPause/onResume`
+  暂停/恢复 WebView。断言 local-server 46、desktop-channels 69，基线 1310。
+  用户实测通过后再发清单与 Release；根因见 B-78/B-79/B-80。
 - **版本** `0.9.0-hlh.35+90035`，已发布：APK 58,652,226 B（`f2f1f269…`）、
   Windows x64 zip 190,980,540 B（`9c1e5b3a…`）。两份更新清单 latest 均为
   `0.9.0-hlh.35` / 90035，GitHub Release `v0.9.0-hlh.35`。hlh.32–hlh.35 修的是
@@ -252,7 +260,23 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 - **安全边界**：游戏页面只持有 3 小时存档会话令牌；设备令牌留在原生/本地服务器侧
   （`__sync_native_token`，0600）。历史存档每个（用户/版本/键）保留 300 份，从最旧删起。
 
-## 3. 这次要做什么（任务 R-20261025-04）
+## 3. 这次要做什么
+
+### 当前任务 R-20261029-01：桌面/安卓性能轮（hlh.36，等用户实测）
+
+标题：**vsync 跟随窗口显示器 + 资源缓存 + 主帧过滤 + 安卓后台暂停**
+
+范围：
+- Windows：vendor `webview_cef`，vsync 源改为窗口所在显示器；最小化不发 BeginFrame。
+- Windows：本地资源服务器加 ETag/Cache-Control（hashed immutable，其余 no-cache+304），
+  HTML 保持 no-store。
+- Windows：`onLoadEnd` 只对本地 origin 主文档重装桥，广告/统计 iframe 不触发。
+- Android：`onPause` / `onResume` 暂停/恢复 WebView。
+
+排除：发布清单与 GitHub Release（等用户实测）、CEF 持久磁盘缓存（B-22 范围）。
+验收见第 4 节顶部；根因与断言见 `docs/07-backlog.md` 的 B-78/B-79/B-80。
+
+### 上一个任务 R-20261025-04（已随 hlh.35 交付）
 
 标题：**多玩家云存档 + 存档页版本来源修正 + Web 单标签页 + 删除在线游玩**
 
@@ -307,6 +331,15 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 动路由(.41)、真实用户 uid 目录迁移（B-23）、Windows CEF 原生补丁（B-22）。
 
 ## 4. 验收标准（做到这些才算 done）
+
+### 当前：hlh.36 性能轮（R-20261029-01）
+- [x] `flutter analyze` 输出 `No issues found!`
+- [x] 客户端 482/482（local-server 46、desktop-channels 69，其余套件未动且复跑通过）
+- [x] APK 90036 与 Windows zip 从最终代码重建（哈希见回执 #29）
+- [ ] 用户实测：数字/字母热键、F10、F11、全屏、退出、最小化恢复、整体流畅度
+- [ ] 安卓实测：切后台 → 回前台仍能继续游戏且不重载
+
+### 上一个任务 R-20261025-04（已完成）
 
 - [x] `flutter analyze` 输出 `No issues found!`
 - [x] 服务端：save-versions 159、concurrency 28、sync-offline 473（Web；App 475）、
