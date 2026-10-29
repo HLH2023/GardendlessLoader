@@ -9,6 +9,7 @@
 
 #include "cef_log_limit.h"
 #include "flutter_window.h"
+#include "gpu_preference.h"
 #include "utils.h"
 
 #include <imm.h>
@@ -42,6 +43,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (cef_exit_code >= 0) {
     return cef_exit_code;
   }
+
+  // 必须在 Flutter 引擎创建之前：Windows 在进程第一次创建 DXGI 设备时
+  // 读取按应用显卡偏好。晚于引擎创建，只有 CEF 会换到独显，而 Flutter
+  // 的 ANGLE 仍留在核显，两边共享纹理打不开，游戏画面会黑。
+  gpu::ApplyStartupPreference();
 
   // CEF 的 debug.log 没有上限，界面异常时可能写到几百 GB；只裁浏览器进程的日志。
   StartCefLogLimit();

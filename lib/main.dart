@@ -14,7 +14,7 @@ import 'src/services/app_settings_store.dart';
 import 'src/ui/home_page.dart';
 import 'src/ui/theme/garden_theme.dart';
 
-Future<void> main() async {
+Future<void> main([List<String> args = const <String>[]]) async {
   WidgetsFlutterBinding.ensureInitialized();
   // 日志是诊断设施，不是启动前置条件。任何初始化失败都必须降级继续：
   // Windows 没有原生日志实现，直接抛异常会让 runApp 永远不执行。
@@ -68,7 +68,7 @@ Future<void> main() async {
     DeviceOrientation.landscapeRight,
   ]));
   runZonedGuarded(
-    () => runApp(GardendlessLoaderApp(logger: logger)),
+    () => runApp(GardendlessLoaderApp(logger: logger, args: args)),
     (error, stackTrace) => logger.emit(
       level: LogLevel.fatal,
       category: 'app.dart',
@@ -82,9 +82,17 @@ Future<void> main() async {
 }
 
 class GardendlessLoaderApp extends StatefulWidget {
-  const GardendlessLoaderApp({required this.logger, super.key});
+  const GardendlessLoaderApp({
+    required this.logger,
+    this.args = const <String>[],
+    super.key,
+  });
 
   final AppLogger logger;
+
+  /// Windows runner 透传的命令行参数；`--gpu-choice-done` 表示这是
+  /// 选完显卡后的重启，本次进程不要再弹选择框。
+  final List<String> args;
 
   @override
   State<GardendlessLoaderApp> createState() => _GardendlessLoaderAppState();
@@ -99,6 +107,7 @@ class _GardendlessLoaderAppState extends State<GardendlessLoaderApp>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _controller = AppController(appLogger: widget.logger);
+    _controller.gpuPromptSuppressed = widget.args.contains('--gpu-choice-done');
     unawaited(_controller.initialize().then((_) {
       if (mounted && _controller.initialized) {
         unawaited(_controller.refreshAboutContent());

@@ -3,8 +3,11 @@
 #include <flutter/standard_method_codec.h>
 
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "gpu_preference.h"
 
 namespace {
 
@@ -67,6 +70,82 @@ bool FlutterWindow::OnCreate() {
             return;
           }
           SetKeyForwarding(*value);
+          result->Success();
+          return;
+        }
+        if (call.method_name() == "listGpus") {
+          result->Success(gpu::AdaptersToEncodable(gpu::ListAdapters()));
+          return;
+        }
+        if (call.method_name() == "getGpuPreference") {
+          result->Success(
+              flutter::EncodableValue(gpu::PreferenceName(
+                  gpu::ReadCurrentPreference())));
+          return;
+        }
+        if (call.method_name() == "getActiveGpu") {
+          const gpu::AdapterInfo active = gpu::ActiveAdapter();
+          if (active.name.empty()) {
+            result->Success(flutter::EncodableValue());
+          } else {
+            result->Success(gpu::AdapterToEncodable(active));
+          }
+          return;
+        }
+        if (call.method_name() == "setGpuPreference") {
+          const auto* arguments =
+              std::get_if<flutter::EncodableMap>(call.arguments());
+          if (arguments == nullptr) {
+            result->Error("invalid_arguments", "expected a map");
+            return;
+          }
+          const auto preference_it =
+              arguments->find(flutter::EncodableValue("preference"));
+          if (preference_it == arguments->end()) {
+            result->Error("invalid_arguments", "missing preference");
+            return;
+          }
+          const auto* preference_name =
+              std::get_if<std::string>(&preference_it->second);
+          gpu::Preference preference = gpu::Preference::kAutomatic;
+          if (preference_name == nullptr ||
+              !gpu::PreferenceFromName(*preference_name, &preference)) {
+            result->Error("invalid_arguments", "unknown preference");
+            return;
+          }
+          bool remember = false;
+          const auto remember_it =
+              arguments->find(flutter::EncodableValue("remember"));
+          if (remember_it != arguments->end()) {
+            const auto* value = std::get_if<bool>(&remember_it->second);
+            if (value != nullptr) remember = *value;
+          }
+          result->Success(
+              flutter::EncodableValue(gpu::SetPreference(preference, remember)));
+          return;
+        }
+        if (call.method_name() == "restart") {
+          // 显卡偏好由 Windows 在进程创建 DXGI 设备时读取，改完只能重启
+          // 加载器；重启时带 `--gpu-choice-done`，新进程不再弹一次选择框。
+          std::wstring command_line = ::GetCommandLineW();
+          if (command_line.find(L"--gpu-choice-done") ==
+              std::wstring::npos) {
+            command_line += L" --gpu-choice-done";
+          }
+          std::vector<wchar_t> mutable_command_line(command_line.begin(),
+                                                    command_line.end());
+          mutable_command_line.push_back(L'\0');
+          STARTUPINFOW startup_info = {sizeof(startup_info)};
+          PROCESS_INFORMATION process_info = {};
+          if (!::CreateProcessW(nullptr, mutable_command_line.data(), nullptr,
+                               nullptr, FALSE, 0, nullptr, nullptr,
+                               &startup_info, &process_info)) {
+            result->Error("restart_failed", "CreateProcessW failed");
+            return;
+          }
+          ::CloseHandle(process_info.hThread);
+          ::CloseHandle(process_info.hProcess);
+          ::PostMessage(GetHandle(), WM_CLOSE, 0, 0);
           result->Success();
           return;
         }

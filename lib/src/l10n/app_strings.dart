@@ -679,6 +679,52 @@ class AppStrings {
         ScreenFit.showAll => _t('完整显示', 'Show all'),
         ScreenFit.stretch => _t('强制拉伸', 'Stretch'),
       };
+  String get gpuPreference => _t('显卡偏好', 'GPU preference');
+  String get gpuPreferenceSubtitle => _t(
+        'Windows 只提供自动 / 高性能 / 节能三档。改完后需要重启加载器，'
+            '游戏和加载器才会一起换到同一块显卡。',
+        'Windows exposes only Automatic / High performance / Power saving. '
+            'Restart the loader afterwards so the game and the loader switch '
+            'to the same GPU together.',
+      );
+  String get gpuPreferenceAutomatic =>
+      _t('自动（由 Windows 决定）', 'Automatic (Windows decides)');
+  String get gpuPreferenceHigh => _t('高性能（独显优先）', 'High performance');
+  String get gpuPreferencePower => _t('节能（核显优先）', 'Power saving');
+  String get gpuPreferenceUnknown =>
+      _t('未检测到显卡信息', 'No GPU information detected');
+  String get gpuPreferenceRestartHint =>
+      _t('更改后需重启加载器', 'Restart the loader to apply');
+  String gpuPreferenceActive(String name) =>
+      _t('本进程实际使用：$name', 'In use by this process: $name');
+  String get chooseGpu => _t('选择显卡…', 'Choose GPU…');
+  String get gpuDialogTitle => _t('选择游戏显卡', 'Choose the game GPU');
+  String get gpuDialogSubtitle => _t(
+        '检测到多块显卡。Windows 只允许按“高性能 / 节能”分类指定；'
+            '保存后需要重启加载器，游戏才会使用新显卡。',
+        'Multiple GPUs detected. Windows only lets apps pick a performance '
+            'class; the loader will restart so the game can use the new GPU.',
+      );
+  String get gpuDialogRemember => _t('记住选择，下次不再询问', 'Remember my choice');
+  String get gpuDialogSave => _t('保存', 'Save');
+  String get gpuDialogCancel => _t('取消', 'Cancel');
+  String get gpuRestartTitle => _t('需要重启加载器', 'Restart required');
+  String get gpuRestartBody => _t(
+        '显卡偏好在加载器重启后才会生效。是否现在重启？',
+        'The GPU preference takes effect after the loader restarts. '
+            'Restart now?',
+      );
+  String get gpuRestartNow => _t('立即重启', 'Restart now');
+  String get gpuRestartLater => _t('稍后', 'Later');
+  String get gpuRestartFailed => _t(
+      '无法自动重启，请手动退出并重新打开加载器。',
+      'Could not restart automatically; '
+          'quit and reopen the loader manually.');
+  String get gpuPreferenceFailed => _t(
+      '无法写入显卡设置，本次仍使用当前显卡。',
+      'Could not write the GPU preference; '
+          'this session keeps the current GPU.');
+  String get gpuRecommended => _t('推荐', 'Recommended');
   String get watermark => _t('游戏水印', 'Watermark');
   String get watermarkSubtitle => _t(
         '在游戏画面角落显示加载器标识',

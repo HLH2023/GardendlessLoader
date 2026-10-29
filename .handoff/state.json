@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "project": "GardendlessLoader",
-  "updatedAt": "2026-10-29T01:50:00+08:00",
+  "updatedAt": "2026-10-29T15:30:00+08:00",
   "updatedBy": "orchestrator/opencode",
   "release": {
     "versionName": "0.9.0-hlh.38",
@@ -48,8 +48,8 @@
   },
   "tests": {
     "server": 828,
-    "client": 500,
-    "total": 1328,
+    "client": 536,
+    "total": 1364,
     "suites": [
       {
         "name": "server/cloud-saves",
@@ -142,6 +142,11 @@
         "count": 10
       },
       {
+        "name": "client/gpu-preference",
+        "cmd": "dart run tool/check_gpu_preference.dart",
+        "count": 36
+      },
+      {
         "name": "client/cloud-saves",
         "cmd": "dart run --define=PVZGE_SERVER=... tool/check_cloud_saves.dart",
         "count": 9
@@ -150,26 +155,27 @@
     "androidJvm": 46
   },
   "task": {
-    "id": "R-20261029-01",
-    "title": "性能轮 + 首页个人构建更新检查 + 安卓后台暂停静音",
-    "status": "review",
-    "dispatchedAt": "2026-10-29T01:05:00+08:00",
+    "id": "R-20261029-02",
+    "title": "Windows 显卡偏好：按应用首选项 + 首次进游戏选择 + 记住/一次性",
+    "status": "in_progress",
+    "dispatchedAt": "2026-10-29T15:10:00+08:00",
     "dispatchedBy": "user",
-    "acceptedAt": "2026-10-29T01:05:00+08:00",
+    "acceptedAt": "2026-10-29T15:10:00+08:00",
     "acceptedBy": "orchestrator/opencode",
-    "brief": "见 .handoff/HANDOFF.md 第 3 节 R-20261029-01",
+    "brief": "见 .handoff/HANDOFF.md 第 3 节 R-20261029-02",
     "scope": [
-      "Windows: vendor webview_cef，vsync 源改为窗口所在显示器；最小化不发 BeginFrame",
-      "Windows: 本地资源服务器加 ETag/Cache-Control（hashed immutable，其余 no-cache+304），HTML 保持 no-store",
-      "Windows: onLoadEnd 只对本地 origin 主文档重装桥，忽略广告/统计 iframe",
-      "首页「检查更新」的加载器分支改读服务端清单（Windows win / Android APK），设置红点与提示同步；上游信息保留在 Loader 卡片",
-      "Android: 切后台暂停游戏并静音（HTMLAudio 池 + WebAudio + blur 触发游戏暂停菜单），回前台恢复当时在播的媒体",
-      "双端同 versionCode 构建（hlh.38 / 90038）并发布"
+      "Windows: gpu_preference.cc 枚举 DXGI 适配器、读写 HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences（GpuPreference=2/1），保留同字符串其它字段",
+      "Windows: wWinMain 在 FlutterWindow 创建之前应用偏好；SetPreference 只写本程序镜像，避免 CEF 单独换卡导致共享纹理黑屏",
+      "Windows: 记住/一次性两种语义（Desired/Pending/Previous/Restore），一次性选择在下次启动还原",
+      "设置页新增显卡行 + 首次进游戏弹选择框（自动/高性能/节能，可记住）",
+      "改卡后提示重启；restart 带 --gpu-choice-done；设置页用 getActiveGpu 显示本进程实际使用的显卡",
+      "双端同 versionCode 构建（hlh.39 / 90039）并发布"
     ],
     "outOfScope": [
       "改动 upstream(Dey410) 分支或向上游提 PR",
       "把个人服务器地址/令牌写入任何受版本控制的文件",
-      "发布 APK/Windows 清单与 GitHub Release（等用户手动测试后）",
+      "CEF --use-adapter-luid 单独换卡（会破坏 Flutter/CEF 共享纹理）",
+      "3 块以上显卡的单卡指定（Windows 只有高性能/节能两档）",
       "为 CEF 配置持久磁盘缓存（B-22 范围，需单独设计）"
     ],
     "lastReceiptAt": "2026-10-29T01:50:00+08:00"
@@ -3502,6 +3508,13 @@
       "event": "release",
       "task": "R-20261029-01",
       "note": "hlh.38 发布：安卓后台暂停/静音（Release 426995104）"
+    },
+    {
+      "at": "2026-10-29T15:30:00+08:00",
+      "by": "orchestrator/opencode",
+      "event": "implementation",
+      "task": "R-20261029-02",
+      "note": "hlh.39 Windows 显卡偏好代码完成；Windows 产物/真机待补"
     }
   ]
 }

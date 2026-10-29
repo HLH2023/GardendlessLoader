@@ -21,8 +21,16 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 
 服务端另有一个私有仓 `HLH2023/pvzge-server`（存档 API + 网关脚本），不在本仓库内。
 
-## 2. 当前状态（hlh.38 已发布，等用户实测）
+## 2. 当前状态（hlh.39 已实现，等 Windows 构建/实测）
 
+- **hlh.39 Windows 显卡偏好（代码完成，未构建）**：多显卡机器上游戏默认落在核显。
+  新增设置页「显卡偏好」与首次进游戏的「选择游戏显卡」弹窗（自动 / 高性能 / 节能，
+  可记住）；通过 `HKCU\Software\Microsoft\DirectX\UserGpuPreferences` 的
+  `GpuPreference=2/1` 让 Flutter 与 CEF 在进程启动时一起换卡，原生启动钩子
+  `gpu::ApplyStartupPreference()` 在 `FlutterWindow` 创建之前执行。改卡需要重启
+  加载器，重启会带 `--gpu-choice-done` 并自动跳过选择框；设置页展示
+  `getActiveGpu` 查到的「本进程实际使用」显卡。断言见 `tool/check_gpu_preference.dart`
+  36 项、B-83。**Windows 产物与真机验证待补。**
 - **hlh.38 安卓后台暂停/静音（已发布）**：新增 `media_lifecycle.js`，切后台时
   暂停 HTMLAudio 池（游戏音频不挂 DOM）、suspend WebAudio，并派发 `window blur`
   触发游戏自己的暂停菜单；回前台只恢复当时在播的媒体。APK 58,653,811 B
@@ -274,22 +282,26 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 
 ## 3. 这次要做什么
 
-### 当前任务 R-20261029-01：性能轮 + 首页更新检查 + 安卓后台暂停（hlh.38，等实测）
+### 当前任务 R-20261029-02：Windows 显卡偏好（hlh.39，等构建/实测）
 
-标题：**vsync 跟随窗口显示器 + 资源缓存 + 首页个人构建更新 + 安卓后台暂停/静音**
+标题：**按应用显卡首选项 + 首次进游戏选择 + 记住/一次性 + 重启生效**
 
 范围：
-- Windows：vendor `webview_cef`，vsync 源改为窗口所在显示器；最小化不发 BeginFrame（hlh.36）。
-- Windows：本地资源服务器加 ETag/Cache-Control（hashed immutable，其余 no-cache+304），
-  HTML 保持 no-store（hlh.36）。
-- Windows：`onLoadEnd` 只对本地 origin 主文档重装桥（hlh.36）。
-- 首页「检查更新」加载器分支改读服务端清单（Windows win / 安卓 APK），
-  设置红点与提示同步（hlh.37）。
-- Android：`media_lifecycle.js` 切后台暂停游戏并静音（HTMLAudio 池 + WebAudio +
-  `blur` 触发游戏暂停菜单），回前台恢复当时在播的媒体（hlh.38）。
+- Windows：`gpu_preference.cc` 枚举 DXGI 适配器、读写按应用
+  `UserGpuPreferences`（`GpuPreference=2/1`）、保存 remember/pending/restore 镜像。
+- Windows：`wWinMain` 在 `FlutterWindow` 之前应用偏好；`getActiveGpu` 用默认
+  D3D11 设备反查本进程实际使用的适配器。
+- 设置页「启动偏好」新增显卡行；首次进游戏（多卡、未询问过）弹选择框，
+  默认选中系统认定的高性能卡，可勾「记住选择」。
+- 改卡后提示重启；`restart` 带 `--gpu-choice-done`，新进程不再重复询问。
+- 断言：新增 `tool/check_gpu_preference.dart` 36 项（模型、2/1 映射、
+  不在当前进程改系统值、启动钩子早于 FlutterWindow、通道/重启/UI 接线）。
 
-排除：发布后的真机功能判定（用户执行）、CEF 持久磁盘缓存（B-22）。
-验收见第 4 节顶部；根因与断言见 `docs/07-backlog.md` 的 B-78～B-82。
+排除：真机 FPS 判定（用户执行）；CEF `--use-adapter-luid` 单独换卡（会破坏
+Flutter/CEF 共享纹理）；3 块以上显卡的单卡指定（Windows 只有两档）。
+验收见第 4 节顶部；根因/断言见 `docs/07-backlog.md` 的 B-83。
+
+### 上一个任务 R-20261029-01（hlh.36–hlh.38，已发布）
 
 ### 上一个任务 R-20261025-04（已随 hlh.35 交付）
 
@@ -347,7 +359,16 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 
 ## 4. 验收标准（做到这些才算 done）
 
-### 当前：hlh.38（R-20261029-01）
+### 当前：hlh.39（R-20261029-02）
+- [x] `flutter analyze` 输出 `No issues found!`
+- [x] 客户端 525/525 实跑（新增 gpu-preference 36；desktop-zip 11 无 fixture
+      未跑，基线 536）
+- [ ] Windows 产物从最终代码重建（MSVC/DXGI 编译 + 双端 90039）
+- [ ] 用户实测：首次进游戏弹显卡选择 → 重启 → 设置页「本进程实际使用」变独显；
+      记住后下次不再询问；改回自动也能还原
+- [ ] 用户实测：热键、F10、F11、全屏、退出、最小化、整体流畅度（hlh.36/38 回归）
+
+### 上一个：hlh.38（R-20261029-01，已发布）
 - [x] `flutter analyze` 输出 `No issues found!`
 - [x] 客户端 489/489 实跑（新增 media-lifecycle 10、game-host 97、update-manifest 59；
       desktop-zip 11 无 fixture 未跑）

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,8 @@ import '../app_controller.dart';
 import '../l10n/app_strings.dart';
 import '../logging/log_event_catalog.dart';
 import '../models.dart';
+import '../services/gpu_adapter.dart';
+import '../services/gpu_preference_service.dart';
 import '../services/sensor_housing_service.dart';
 import '../services/shortcut_service.dart';
 import '../services/update_check_service.dart';
@@ -23,6 +26,7 @@ import 'pages/settings_page.dart';
 import 'theme/garden_theme.dart';
 import 'widgets/announcement_dialog.dart';
 import 'widgets/garden_widgets.dart';
+import 'widgets/gpu_choice_dialog.dart';
 import 'widgets/key_art_backdrop.dart';
 
 const _appIconAsset = 'tool/generated_icons/app_icon_master.png';
@@ -532,6 +536,8 @@ class _HomePageState extends State<HomePage> {
     final strings = context.strings;
     // 桌面端：起本地服务器 + 进程内 WebView 窗口（两种形态共用同一通路）
     if (_controller.isDesktopPlatform) {
+      if (!await _ensureGpuChoiceBeforeLaunch()) return;
+      if (!mounted) return;
       DesktopGameLaunch launch;
       try {
         launch = await _controller.prepareDesktopGame();
@@ -581,6 +587,95 @@ class _HomePageState extends State<HomePage> {
         code: 'game_host_launch_failed',
       );
     }
+  }
+
+  /// Windows：第一次进游戏时让用户选显卡。
+  ///
+  /// 为什么必须发生在 `prepareDesktopGame` 之前：显卡偏好由 Windows 在
+  /// 进程创建 DXGI 设备时读取，Flutter 引擎比 CEF 更早启动；只给 CEF 换卡
+  /// 会让两边不在同一块 GPU 上，共享纹理打不开。唯一稳妥的办法是改完重启，
+  /// 新进程里 Flutter 和 CEF 一起换。返回 false 表示不要继续启动游戏。
+  Future<bool> _ensureGpuChoiceBeforeLaunch() async {
+    if (!Platform.isWindows) return true;
+    if (_controller.gpuChoicePrompted || _controller.gpuPromptSuppressed) {
+      return true;
+    }
+    final service = GpuPreferenceService.instance;
+    final adapters = await service.listAdapters();
+    if (!mounted) return false;
+    final visible =
+        adapters.where((adapter) => !adapter.software).toList(growable: false);
+    // 单卡机器没有选择的意义；不写 prompted，以后加卡仍会询问。
+    if (visible.length < 2) return true;
+    final current = await service.currentPreference();
+    final active = await service.activeAdapter();
+    if (!mounted) return false;
+    final result = await showGpuChoiceDialog(
+      context,
+      adapters: visible,
+      // 第一次询问时默认指向独显：用户点开这个弹窗就是为了避免核显。
+      initial: current == GpuPreference.automatic
+          ? GpuPreference.highPerformance
+          : current,
+    );
+    if (result == null || !mounted) return false;
+
+    // 当前进程的 Flutter 已经用旧显卡建好设备；只有重启才能让 Flutter 和
+    // CEF 一起换卡。不重启时连注册表都不能改，否则只有 CEF 换卡会黑屏。
+    if (activeMatchesPreference(
+      preference: result.preference,
+      adapters: visible,
+      active: active,
+      currentPreference: current,
+    )) {
+      await _controller.recordGpuChoice(
+        result.preference,
+        remember: result.remember,
+      );
+      return true;
+    }
+    final restart = await showGpuRestartDialog(context);
+    if (!mounted) return false;
+    if (!restart) {
+      if (result.remember) {
+        final applied = await service.setPreference(
+          result.preference,
+          remember: true,
+        );
+        if (!mounted) return false;
+        if (!applied) {
+          _toast(context.strings.gpuPreferenceFailed,
+              code: 'gpu_preference_write_failed');
+        }
+        await _controller.recordGpuChoice(result.preference, remember: true);
+      } else {
+        // 不记住：本次继续用旧卡，下次启动重新问。
+        _controller.gpuPromptSuppressed = true;
+      }
+      return true;
+    }
+
+    final applied = await service.setPreference(
+      result.preference,
+      remember: result.remember,
+    );
+    if (!mounted) return false;
+    if (!applied) {
+      _toast(context.strings.gpuPreferenceFailed,
+          code: 'gpu_preference_write_failed');
+      return true;
+    }
+    await _controller.recordGpuChoice(
+      result.preference,
+      remember: result.remember,
+    );
+    if (!mounted) return false;
+    final restarted = await service.restart();
+    if (!restarted && mounted) {
+      _toast(context.strings.gpuRestartFailed, code: 'gpu_restart_failed');
+      return true;
+    }
+    return false;
   }
 
   Future<void> _copyResourceRoot() async {

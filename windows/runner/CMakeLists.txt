@@ -9,6 +9,7 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME} WIN32
   "cef_log_limit.cc"
   "flutter_window.cpp"
+  "gpu_preference.cc"
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
@@ -35,6 +36,10 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
+# 显卡枚举走 DXGI；按应用显卡偏好读写 HKCU（RegOpenKeyEx 等）走 advapi32；
+# 设置页的「当前进程实际用哪块卡」需要创建一个默认 D3D11 设备。
+target_link_libraries(${BINARY_NAME} PRIVATE "d3d11.lib" "dxgi.lib"
+    "advapi32.lib")
 # ImmGetVirtualKey：中文输入法把 WM_KEYDOWN 的 wParam 换成 VK_PROCESSKEY 后，
 # 要靠它取回真正的虚拟键码（见 main.cpp 的 NormalizeVirtualKey）。
 target_link_libraries(${BINARY_NAME} PRIVATE "imm32.lib")

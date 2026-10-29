@@ -29,6 +29,8 @@ import 'services/diagnostics_service.dart';
 import 'services/external_url_service.dart';
 import 'services/garden_journal.dart';
 import 'services/game_update_check_service.dart';
+import 'services/gpu_adapter.dart';
+import 'services/gpu_preference_service.dart';
 import 'services/import_service.dart';
 import 'services/import_progress_meter.dart';
 import 'services/manifest_store.dart';
@@ -167,6 +169,11 @@ class AppController extends ChangeNotifier {
   bool _gameUpdateDetected = false;
   bool _updateCheckInProgress = false;
   AppSettings _appSettings = const AppSettings();
+
+  /// 本次进程里不再询问显卡。重启后由 `--gpu-choice-done` 重新置位；
+  /// 用户选择「不记住」时，下一次手动启动会再次询问。
+  bool gpuPromptSuppressed = false;
+
   bool _initialized = false;
   bool _busy = false;
   LauncherMessage? _message;
@@ -245,6 +252,9 @@ class AppController extends ChangeNotifier {
   bool get toolShedUnlocked => _appSettings.toolShedUnlocked;
   bool get touchDiagnosticsEnabled => _appSettings.touchDiagnosticsEnabled;
   bool get autoCollectSunEnabled => _manifest.autoCollectSunEnabled;
+  GpuPreference get gpuPreference => _appSettings.gpuPreference;
+  bool get gpuChoicePrompted => _appSettings.gpuChoicePrompted;
+
   GameHostPlatform get gameHostPlatform => GameHostPlatform.current();
 
   /// Where the user signed in to issue the device token, and the server the
@@ -1184,6 +1194,13 @@ class AppController extends ChangeNotifier {
         _appSettingsStore = AppSettingsStore(_paths!.appSettingsFile);
         _appSettings = await _appSettingsStore!.read();
         _applyLanguage(_appSettings.languagePreference);
+        // 原生启动钩子已经在 Flutter 引擎创建前应用过记住的显卡偏好；
+        // 这里再补写一次，只为覆盖「安装目录变了、旧 exe 路径的注册表项
+        // 不再命中」的情况，对当前进程的渲染后端无效。
+        if (Platform.isWindows && _appSettings.gpuChoicePrompted) {
+          unawaited(GpuPreferenceService.instance
+              .syncRemembered(_appSettings.gpuPreference));
+        }
         // Windows 更新是「退出应用 → 外部脚本覆盖 → 自动重启」，结果只能靠
         // 脚本写的回执在下次启动时告诉用户：成功 / 已回滚 / 失败原因。
         // 先算出来、写日志，最后再决定要不要占用 _message：启动失败这类
@@ -2516,6 +2533,33 @@ class AppController extends ChangeNotifier {
 
   Future<void> setScreenFit(ScreenFit fit) {
     return _updateAppSettings(_appSettings.copyWith(screenFit: fit));
+  }
+
+  /// 设置页显式改显卡：等同于「选择并记住」。
+  Future<void> setGpuPreference(GpuPreference preference) {
+    gpuPromptSuppressed = true;
+    return _updateAppSettings(
+      _appSettings.copyWith(
+        gpuPreference: preference,
+        gpuChoicePrompted: true,
+      ),
+    );
+  }
+
+  /// 首次进游戏的选择结果。勾了「记住」才落盘；没勾只压制本次进程的
+  /// 重复询问，下一次启动继续问。
+  Future<void> recordGpuChoice(
+    GpuPreference preference, {
+    required bool remember,
+  }) async {
+    gpuPromptSuppressed = true;
+    if (!remember) return;
+    await _updateAppSettings(
+      _appSettings.copyWith(
+        gpuPreference: preference,
+        gpuChoicePrompted: true,
+      ),
+    );
   }
 
   Future<void> setDetailedAudioDiagnosticsEnabled(bool enabled) {

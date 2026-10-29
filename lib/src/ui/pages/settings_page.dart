@@ -9,9 +9,12 @@ import '../../game_host/game_host.dart';
 import '../../l10n/app_strings.dart';
 import '../../models.dart';
 import '../../services/app_settings_store.dart';
+import '../../services/gpu_adapter.dart';
+import '../../services/gpu_preference_service.dart';
 import '../launcher_actions.dart';
 import '../theme/garden_theme.dart';
 import '../widgets/garden_widgets.dart';
+import '../widgets/gpu_choice_dialog.dart';
 import '../widgets/token_login_dialog.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -743,6 +746,175 @@ class _LaunchPreferences extends StatelessWidget {
             value: controller.watermarkEnabled,
             onChanged:
                 controller.initialized ? controller.setWatermarkEnabled : null,
+          ),
+          if (Platform.isWindows) ...[
+            Divider(color: palette.border),
+            _GpuPreferenceRow(controller: controller),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Windows 显卡偏好。只在设置页展示，不改动已有行；首次进游戏的询问
+/// 走 HomePage 的同一个弹窗，避免两套文案/逻辑。
+class _GpuPreferenceRow extends StatefulWidget {
+  const _GpuPreferenceRow({required this.controller});
+
+  final AppController controller;
+
+  @override
+  State<_GpuPreferenceRow> createState() => _GpuPreferenceRowState();
+}
+
+class _GpuPreferenceRowState extends State<_GpuPreferenceRow> {
+  List<GpuAdapterInfo> _adapters = const [];
+  GpuAdapterInfo? _active;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final service = GpuPreferenceService.instance;
+    final adapters = await service.listAdapters();
+    final active = await service.activeAdapter();
+    if (!mounted) return;
+    setState(() {
+      _adapters = adapters;
+      _active = active;
+      _loading = false;
+    });
+  }
+
+  GpuAdapterInfo? get _high => highPerformanceAdapter(_adapters);
+  GpuAdapterInfo? get _power => powerSavingAdapter(_adapters);
+
+  String _label(AppStrings strings, GpuPreference preference) {
+    return switch (preference) {
+      GpuPreference.automatic => strings.gpuPreferenceAutomatic,
+      GpuPreference.highPerformance => _high == null
+          ? strings.gpuPreferenceHigh
+          : '${strings.gpuPreferenceHigh} · ${_high!.label}',
+      GpuPreference.powerSaving => _power == null
+          ? strings.gpuPreferencePower
+          : '${strings.gpuPreferencePower} · ${_power!.label}',
+    };
+  }
+
+  Future<void> _pick() async {
+    if (_loading) return;
+    final strings = context.strings;
+    final service = GpuPreferenceService.instance;
+    final current = await service.currentPreference();
+    final active = await service.activeAdapter();
+    if (!mounted) return;
+    final result = await showGpuChoiceDialog(
+      context,
+      adapters: _adapters,
+      initial: widget.controller.gpuPreference,
+      allowCancel: true,
+    );
+    if (result == null || !mounted) return;
+    final applied =
+        await service.setPreference(result.preference, remember: true);
+    if (!mounted) return;
+    if (!applied) {
+      _showMessage(strings.gpuPreferenceFailed);
+      return;
+    }
+    await widget.controller.setGpuPreference(result.preference);
+    if (!mounted) return;
+    if (activeMatchesPreference(
+      preference: result.preference,
+      adapters: _adapters,
+      active: active,
+      currentPreference: current,
+    )) {
+      return;
+    }
+    final restart = await showGpuRestartDialog(context);
+    if (!restart) return;
+    if (!await service.restart() && mounted) {
+      _showMessage(strings.gpuRestartFailed);
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = context.strings;
+    final palette = context.garden;
+    return Padding(
+      key: const ValueKey('gpu-preference'),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  strings.gpuPreference,
+                  style: TextStyle(
+                    color: palette.ink,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _loading
+                      ? strings.checking
+                      : _adapters.isEmpty
+                          ? strings.gpuPreferenceUnknown
+                          : _label(strings, widget.controller.gpuPreference),
+                  style: TextStyle(
+                    color: palette.inkMuted,
+                    fontSize: 12.5,
+                    height: 1.45,
+                  ),
+                ),
+                if (_active != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    strings.gpuPreferenceActive(_active!.label),
+                    style: TextStyle(
+                      color: palette.inkMuted,
+                      fontSize: 12,
+                      height: 1.45,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 4),
+                Text(
+                  strings.gpuPreferenceSubtitle,
+                  style: TextStyle(
+                    color: palette.inkFaint,
+                    fontSize: 12,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          GardenButton(
+            key: const ValueKey('gpu-preference-choose'),
+            label: strings.chooseGpu,
+            compact: true,
+            onPressed: _loading || _adapters.isEmpty ? null : _pick,
           ),
         ],
       ),

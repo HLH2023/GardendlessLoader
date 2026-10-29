@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../constants.dart';
 import '../game_host/game_host_platform.dart';
+import 'gpu_adapter.dart';
 
 enum ThemePreference {
   system,
@@ -68,6 +69,8 @@ class AppSettings {
     this.deviceToken = '',
     this.deviceAccount = '',
     this.desktopLocalPort = 0,
+    this.gpuPreference = GpuPreference.automatic,
+    this.gpuChoicePrompted = false,
   });
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
@@ -94,6 +97,8 @@ class AppSettings {
       deviceToken: (json['deviceToken'] as String? ?? '').trim(),
       deviceAccount: (json['deviceAccount'] as String? ?? '').trim(),
       desktopLocalPort: _readPort(json['desktopLocalPort']),
+      gpuPreference: GpuPreference.fromName(json['gpuPreference']),
+      gpuChoicePrompted: json['gpuChoicePrompted'] as bool? ?? false,
     );
   }
 
@@ -141,6 +146,14 @@ class AppSettings {
   /// 首次分配后固定复用，不能随便改，否则等于换掉存档所在的 origin。
   final int desktopLocalPort;
 
+  /// Windows 上游戏渲染使用的显卡档位。默认 automatic（由 Windows 决定），
+  /// 与系统「图形性能首选项」一致；实际写入由原生层完成。
+  final GpuPreference gpuPreference;
+
+  /// 是否已经完成过「第一次进游戏选显卡」的询问。用户勾了「记住选择」才会
+  /// 置为 true；没勾时下次启动会重新询问，但本次会话不再重复弹窗。
+  final bool gpuChoicePrompted;
+
   /// The server this app talks to: the value saved in settings, else the one
   /// compiled in. Empty when neither is a usable https URL.
   String get effectiveServerBaseUrl {
@@ -170,6 +183,8 @@ class AppSettings {
     String? deviceToken,
     String? deviceAccount,
     int? desktopLocalPort,
+    GpuPreference? gpuPreference,
+    bool? gpuChoicePrompted,
   }) {
     return AppSettings(
       watermarkEnabled: watermarkEnabled ?? this.watermarkEnabled,
@@ -190,6 +205,8 @@ class AppSettings {
       deviceToken: deviceToken ?? this.deviceToken,
       deviceAccount: deviceAccount ?? this.deviceAccount,
       desktopLocalPort: desktopLocalPort ?? this.desktopLocalPort,
+      gpuPreference: gpuPreference ?? this.gpuPreference,
+      gpuChoicePrompted: gpuChoicePrompted ?? this.gpuChoicePrompted,
     );
   }
 
@@ -210,6 +227,8 @@ class AppSettings {
         'deviceToken': deviceToken,
         'deviceAccount': deviceAccount,
         'desktopLocalPort': desktopLocalPort,
+        'gpuPreference': gpuPreference.wireName,
+        'gpuChoicePrompted': gpuChoicePrompted,
       };
 }
 

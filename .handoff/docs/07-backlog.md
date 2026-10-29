@@ -103,6 +103,36 @@
 
 ## 已关闭
 
+`B-83 多显卡机器上游戏优先用核显、独显闲置 → 已修（2026-10-29，P1，Windows runner + Dart，hlh.39）→
+现象：有核显 + 独显的机器开始游戏时，任务管理器里游戏负载落在核显，独显几乎不动；
+用户要求在设置里选择优先显卡，第一次进游戏时询问并可记住。
+根因：Flutter 引擎与 CEF 都通过 ANGLE 的 D3D11 后端创建默认设备，Windows 默认适配器
+顺序在混合显卡/多显示器机器上经常先给核显。CEF 的 `--use-adapter-luid` 虽然能按 LUID
+指定适配器，但 Flutter 引擎的 ANGLE 显示创建不接受这个开关；只给 CEF 换卡会让 Flutter
+留在核显、CEF 在独显，`OpenSharedResource1` 打不开跨适配器的共享纹理，游戏画面变黑。
+修法（只能让两边一起换）：
+1. 用 Windows 的按应用图形性能首选项
+   `HKCU\Software\Microsoft\DirectX\UserGpuPreferences`：值名是 exe 全路径，
+   数据 `GpuPreference=2;`（高性能）/`1;`（节能）/移除（自动）；保留同一字符串里的
+   其它字段（例如驱动的 `SwapEffectUpgradeEnable`）。
+2. 原生 `windows/runner/gpu_preference.cc` 在 `wWinMain` 的 `initCEFProcesses` 之后、
+   `FlutterWindow` 创建之前应用偏好；这是 Flutter 引擎创建 DXGI 设备前唯一可靠的时机。
+   `SetPreference` 只写本程序 HKCU 镜像，**不立即改系统值**——当前 Flutter 已经在旧卡上，
+   立刻改只会让随后启动的 CEF 单独换卡。
+3. 镜像支持「记住 / 一次性」：一次性选择写入 `PendingGpuPreference` 并保存原值，
+   下次启动应用后还原；记住的值写入 `GpuPreference` 并在每次启动应用。
+4. 首次进游戏（>1 块硬件显卡且 `gpuChoicePrompted=false`）弹「选择游戏显卡」，
+   默认指向系统认定的高性能卡，勾「记住选择」后落盘；改卡后提示重启，加载器
+   自动重启并带 `--gpu-choice-done`，新进程不再重复询问。
+5. 设置页「启动偏好」新增显卡行，显示三档选择与「本进程实际使用」的适配器
+   （原生 `getActiveGpu` 创建一个默认 D3D11 设备后取 `IDXGIAdapter`）。
+断言：新增 `tool/check_gpu_preference.dart` **36** 项（模型往返、2/1 映射、
+`SetPreference` 不直接写系统值、启动钩子早于 `FlutterWindow`、通道方法、重启参数、
+UI 接线、active 匹配判断）。
+残余：① Windows 实机确认设置页「实际使用」在重启后变为独显；若仍为核显，说明该驱动/
+系统组合不认 `UserGpuPreferences`，需要改用 CEF `--use-adapter-luid` + Flutter 侧同卡方案
+（需改引擎，成本高）。② Windows 只有高性能/节能两档，3 块以上显卡无法单独指定第三块。
+③ 只在 Windows 生效。
 `B-82 安卓切后台游戏不停声、也不弹暂停 → 已修（2026-10-29，P1，Android + 注入脚本，hlh.38）→
 现象：hlh.36/37 切到后台后音乐继续播，回到前台游戏照常跑；只看得到画面冻结（如果有）。
 根因：`WebView.onPause()` 只停布局/解析/JS 计时器，不碰音频。游戏的音频是
