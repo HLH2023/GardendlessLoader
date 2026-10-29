@@ -129,10 +129,11 @@
 断言：新增 `tool/check_gpu_preference.dart` **36** 项（模型往返、2/1 映射、
 `SetPreference` 不直接写系统值、启动钩子早于 `FlutterWindow`、通道方法、重启参数、
 UI 接线、active 匹配判断）。
-残余：① Windows 实机确认设置页「实际使用」在重启后变为独显；若仍为核显，说明该驱动/
-系统组合不认 `UserGpuPreferences`，需要改用 CEF `--use-adapter-luid` + Flutter 侧同卡方案
-（需改引擎，成本高）。② Windows 只有高性能/节能两档，3 块以上显卡无法单独指定第三块。
-③ 只在 Windows 生效。
+残余：① 构建机只有一块 3D 显卡（RTX 5060，DXGI 枚举出的 4 个同名条目已按描述去重），
+注册表语义已用原生用例 7/7 验证，但「重启后实际换到独显」仍需在多卡机器上确认；
+若仍为核显，说明该驱动/系统组合不认 `UserGpuPreferences`，需要改用 CEF
+`--use-adapter-luid` + Flutter 侧同卡方案（需改引擎，成本高）。② Windows 只有
+高性能/节能两档，3 块以上显卡无法单独指定第三块。③ 只在 Windows 生效。
 `B-82 安卓切后台游戏不停声、也不弹暂停 → 已修（2026-10-29，P1，Android + 注入脚本，hlh.38）→
 现象：hlh.36/37 切到后台后音乐继续播，回到前台游戏照常跑；只看得到画面冻结（如果有）。
 根因：`WebView.onPause()` 只停布局/解析/JS 计时器，不碰音频。游戏的音频是

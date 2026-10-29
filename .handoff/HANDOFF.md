@@ -21,16 +21,19 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 
 服务端另有一个私有仓 `HLH2023/pvzge-server`（存档 API + 网关脚本），不在本仓库内。
 
-## 2. 当前状态（hlh.39 已实现，等 Windows 构建/实测）
+## 2. 当前状态（hlh.39 已发布，等 Windows 真机验证）
 
-- **hlh.39 Windows 显卡偏好（代码完成，未构建）**：多显卡机器上游戏默认落在核显。
+- **hlh.39 Windows 显卡偏好（已发布）**：多显卡机器上游戏默认落在核显。
   新增设置页「显卡偏好」与首次进游戏的「选择游戏显卡」弹窗（自动 / 高性能 / 节能，
   可记住）；通过 `HKCU\Software\Microsoft\DirectX\UserGpuPreferences` 的
   `GpuPreference=2/1` 让 Flutter 与 CEF 在进程启动时一起换卡，原生启动钩子
   `gpu::ApplyStartupPreference()` 在 `FlutterWindow` 创建之前执行。改卡需要重启
   加载器，重启会带 `--gpu-choice-done` 并自动跳过选择框；设置页展示
   `getActiveGpu` 查到的「本进程实际使用」显卡。断言见 `tool/check_gpu_preference.dart`
-  36 项、B-83。**Windows 产物与真机验证待补。**
+  36 项、B-83。APK 58,817,656 B（`5e60a00d…`）、Windows zip 190,188,383 B
+  （`7fc3ea9c…`），两份清单 latest=`0.9.0-hlh.39`/90039，Release
+  `v0.9.0-hlh.39`（id 427582580）。Windows 原生注册表语义 7/7、发布包冒烟 6/6；
+  构建机只有一块 3D 显卡（RTX 5060），「重启后实际换到独显」仍需用户在多卡机器上验证。
 - **hlh.38 安卓后台暂停/静音（已发布）**：新增 `media_lifecycle.js`，切后台时
   暂停 HTMLAudio 池（游戏音频不挂 DOM）、suspend WebAudio，并派发 `window blur`
   触发游戏自己的暂停菜单；回前台只恢复当时在播的媒体。APK 58,653,811 B
@@ -282,7 +285,7 @@ Flutter 写外壳，原生 WebView 承载游戏。上游作者是 `Dey410`，我
 
 ## 3. 这次要做什么
 
-### 当前任务 R-20261029-02：Windows 显卡偏好（hlh.39，等构建/实测）
+### 当前任务 R-20261029-02：Windows 显卡偏好（hlh.39，已发布，等实测）
 
 标题：**按应用显卡首选项 + 首次进游戏选择 + 记住/一次性 + 重启生效**
 
@@ -363,7 +366,11 @@ Flutter/CEF 共享纹理）；3 块以上显卡的单卡指定（Windows 只有�
 - [x] `flutter analyze` 输出 `No issues found!`
 - [x] 客户端 525/525 实跑（新增 gpu-preference 36；desktop-zip 11 无 fixture
       未跑，基线 536）
-- [ ] Windows 产物从最终代码重建（MSVC/DXGI 编译 + 双端 90039）
+- [x] Windows 产物从最终代码重建：MSVC/DXGI 编译通过，exe FileVersion
+      `0.9.0-hlh.39+90039`，zip 190,188,383 B `7fc3ea9c…`；发布包冒烟 6/6；
+      原生注册表语义 7/7（记住 / 一次性 / 下次还原 / 自动）
+- [x] 两端 90039 已发布：两份清单 latest=`0.9.0-hlh.39`/90039，
+      Release `v0.9.0-hlh.39`（id 427582580）含四个资产
 - [ ] 用户实测：首次进游戏弹显卡选择 → 重启 → 设置页「本进程实际使用」变独显；
       记住后下次不再询问；改回自动也能还原
 - [ ] 用户实测：热键、F10、F11、全屏、退出、最小化、整体流畅度（hlh.36/38 回归）

@@ -1,27 +1,27 @@
 {
   "schemaVersion": 1,
   "project": "GardendlessLoader",
-  "updatedAt": "2026-10-29T15:30:00+08:00",
+  "updatedAt": "2026-10-29T15:49:35+08:00",
   "updatedBy": "orchestrator/opencode",
   "release": {
-    "versionName": "0.9.0-hlh.38",
-    "versionCode": 90038,
-    "releasedAt": "2026-10-29T01:50:00+08:00",
+    "versionName": "0.9.0-hlh.39",
+    "versionCode": 90039,
+    "releasedAt": "2026-10-29T15:49:35+08:00",
     "apk": {
-      "file": "gardendless-loader-0.9.0-hlh.38.apk",
-      "size": 58653811,
-      "sha256": "ef05f643539113b47f4ad02df82a85d33ac8c842a0635c594460d7ff1ed43924"
+      "file": "gardendless-loader-0.9.0-hlh.39.apk",
+      "size": 58817656,
+      "sha256": "5e60a00dcbaef1e661aacb0a01468624e1b32f3a50d926b3716bf0b74e404bb4"
     },
     "windows": {
-      "file": "gardendless-loader-0.9.0-hlh.38-90038-windows-x64.zip",
-      "size": 190088476,
-      "sha256": "6cae97a1ee33fecc95fac7e513283671827b8d0bb31d224f10383aff2d1266e1"
+      "file": "gardendless-loader-0.9.0-hlh.39-90039-windows-x64.zip",
+      "size": 190188383,
+      "sha256": "7fc3ea9c0716b5a20058131bf39cea2899ecc23ba56d926ac3721a519753d92a"
     },
-    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.38",
-    "releaseId": 426995104,
+    "releaseUrl": "https://github.com/HLH2023/gardendless-app/releases/tag/v0.9.0-hlh.39",
+    "releaseId": 427582580,
     "manifests": {
-      "apk": "latest=0.9.0-hlh.38/90038",
-      "win": "latest=0.9.0-hlh.38/90038"
+      "apk": "latest=0.9.0-hlh.39/90039",
+      "win": "latest=0.9.0-hlh.39/90039"
     }
   },
   "branches": {
@@ -157,7 +157,7 @@
   "task": {
     "id": "R-20261029-02",
     "title": "Windows 显卡偏好：按应用首选项 + 首次进游戏选择 + 记住/一次性",
-    "status": "in_progress",
+    "status": "review",
     "dispatchedAt": "2026-10-29T15:10:00+08:00",
     "dispatchedBy": "user",
     "acceptedAt": "2026-10-29T15:10:00+08:00",
@@ -178,7 +178,7 @@
       "3 块以上显卡的单卡指定（Windows 只有高性能/节能两档）",
       "为 CEF 配置持久磁盘缓存（B-22 范围，需单独设计）"
     ],
-    "lastReceiptAt": "2026-10-29T01:50:00+08:00"
+    "lastReceiptAt": "2026-10-29T15:49:35+08:00"
   },
   "receipts": [
     {
@@ -3125,6 +3125,54 @@
         "用户实测首页检查更新能看到 hlh.38"
       ],
       "needsHermes": []
+    },
+    {
+      "taskId": "R-20261029-02",
+      "by": "orchestrator/opencode",
+      "at": "2026-10-29T15:49:35+08:00",
+      "status": "review",
+      "readBack": {
+        "taskTitle": "Windows 显卡偏好：按应用首选项 + 首次进游戏选择 + 记住/一次性",
+        "versionBefore": "0.9.0-hlh.38+90038",
+        "testsBaseline": 1364
+      },
+      "changed": [
+        "新增 windows/runner/gpu_preference.{h,cc}：DXGI 适配器枚举（LUID + 描述去重）、UserGpuPreferences 读写（保留同串其它字段）、remember/pending/restore 镜像、启动时应用偏好、默认 D3D11 设备反查活动适配器",
+        "runner 通道新增 listGpus/getGpuPreference/getActiveGpu/setGpuPreference/restart；restart 追加 --gpu-choice-done；CMake 链接 d3d11/dxgi/advapi32",
+        "wWinMain 在 FlutterWindow 创建前 ApplyStartupPreference；SetPreference 只写本程序镜像，不在当前进程改系统值（避免 CEF 单独换卡导致共享纹理黑屏）",
+        "Dart：gpu_adapter/gpu_preference_service、AppSettings 持久化 gpuPreference/gpuChoicePrompted、首页首次进游戏门禁、选择弹窗与重启提示、设置页显卡行与「本进程实际使用」",
+        "新增 tool/check_gpu_preference.dart 36 项；07-backlog B-83；HANDOFF/state 同步",
+        "发布 hlh.39：APK 58,817,656 B、Windows zip 190,188,383 B，两份清单 latest=0.9.0-hlh.39/90039，Release 427582580（四个资产）"
+      ],
+      "commands": [
+        "flutter analyze -> No issues found!",
+        "客户端套件逐项 dart run（state.tests.suites）-> 525 通过 / 0 失败；desktop-zip 11 无 fixture 未跑",
+        "Windows: tools/build-windows.ps1 -> Built gardendless_loader.exe；zip 190,188,383 B sha256 7fc3ea9c0716b5a2…；exe FileVersion 0.9.0-hlh.39+90039",
+        "Windows: 原生 gpu_pref_test.exe（链接 gpu_preference.cc）-> 7 ok / 0 fail（自动清除 / 记住只写镜像 / 启动写入 2 / 一次性写 1 / 下次还原 2 / 自动移除字段）",
+        "Windows: tools/smoke-windows-build.ps1 -> 6 通过 / 0 失败（解压启动 12 秒存活，事件日志无崩溃）",
+        "publish-apk.sh / publish-windows.sh -> 两份清单 latest=0.9.0-hlh.39/90039",
+        "REST release -> v0.9.0-hlh.39 id 427582580，资产 apk/zip/两份 sha256",
+        "bash tools/handoff.sh verify -> 28 ok / 0 fail"
+      ],
+      "tests": {
+        "total": 1364,
+        "run": 525,
+        "server": 828,
+        "client": 536,
+        "note": "hlh.39 客户端 525 实跑（desktop-zip 11 无 fixture 未跑）；服务端未改动，沿用 828 基线。新增 client/gpu-preference 36 已计入 536。"
+      },
+      "artifacts": [
+        "APK 0.9.0-hlh.39 58,817,656 B sha256 5e60a00dcbaef1e661aacb0a01468624e1b32f3a50d926b3716bf0b74e404bb4",
+        "Windows zip 0.9.0-hlh.39 190,188,383 B sha256 7fc3ea9c0716b5a20058131bf39cea2899ecc23ba56d926ac3721a519753d92a",
+        "GitHub Release v0.9.0-hlh.39 id 427582580（四个资产）",
+        "清单 /var/www/pvzge-res/{apk,win}/manifest.json latest=0.9.0-hlh.39/90039"
+      ],
+      "remaining": [
+        "用户实测（需多卡 Windows 机器）：首次进游戏弹选择 → 重启 → 设置页「本进程实际使用」变独显；记住 / 不记住 / 改回自动三条路径",
+        "构建机只有一块 3D 显卡（RTX 5060），注册表语义已验证，实际换卡效果无法在该机确认",
+        "安卓与 hlh.38 行为一致（后台暂停/静音），回归项仍待用户实测"
+      ],
+      "needsHermes": []
     }
   ],
   "handoffLog": [
@@ -3515,6 +3563,13 @@
       "event": "implementation",
       "task": "R-20261029-02",
       "note": "hlh.39 Windows 显卡偏好代码完成；Windows 产物/真机待补"
+    },
+    {
+      "at": "2026-10-29T15:49:35+08:00",
+      "by": "orchestrator/opencode",
+      "event": "release",
+      "task": "R-20261029-02",
+      "note": "hlh.39 构建并发布：Windows 显卡偏好；APK/win 清单 latest=90039，Release 427582580"
     }
   ]
 }
